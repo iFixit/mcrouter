@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -137,7 +137,7 @@ class TestRunner {
    public:
     explicit ExpectedRequestCallback(Request req, bool noreply = false)
         : ExpectedCallbackBase(req, noreply), req_(std::move(req)) {}
-    virtual ~ExpectedRequestCallback() = default;
+    ~ExpectedRequestCallback() override = default;
 
    private:
     Request req_;
@@ -180,14 +180,12 @@ class TestRunner {
 
     // ServerMcParser callbacks.
     void caretRequestReady(const UmbrellaMessageInfo&, const folly::IOBuf&) {
-      ASSERT_TRUE(false)
-          << "caretRequestReady should never be called for ASCII";
+      FAIL() << "caretRequestReady should never be called for ASCII";
     }
 
     template <class Request>
     void umbrellaRequestReady(Request&&, uint64_t) {
-      ASSERT_TRUE(false)
-          << "umbrellaRequestReady should never be called for ASCII";
+      FAIL() << "umbrellaRequestReady should never be called for ASCII";
     }
 
     void parseError(mc_res_t, folly::StringPiece reason) {

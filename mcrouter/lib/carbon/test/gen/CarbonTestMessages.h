@@ -277,6 +277,18 @@ class TestRequest : public carbon::RequestCommon {
   std::set<uint64_t>& testSet() {
     return testSet_;
   }
+  const folly::Optional<bool>& testOptionalBool() const {
+    return testOptionalBool_;
+  }
+  folly::Optional<bool>& testOptionalBool() {
+    return testOptionalBool_;
+  }
+  const std::vector<folly::Optional<std::string>>& testOptionalVec() const {
+    return testOptionalVec_;
+  }
+  std::vector<folly::Optional<std::string>>& testOptionalVec() {
+    return testOptionalVec_;
+  }
   const UserType& testType() const {
     return testType_;
   }
@@ -303,17 +315,8 @@ class TestRequest : public carbon::RequestCommon {
   SimpleStruct _carbon_simplestruct_;
   carbon::Keys<folly::IOBuf> key_;
   test2::util::SimpleEnum testEnum_{test2::util::SimpleEnum::Twenty};
-  bool testBool_{false};
-  char testChar_{'\0'};
-  int8_t testInt8_{0};
-  int16_t testInt16_{0};
-  int32_t testInt32_{0};
   int64_t testInt64_{0};
-  uint8_t testUInt8_{0};
-  uint16_t testUInt16_{0};
-  uint32_t testUInt32_{0};
   uint64_t testUInt64_{0};
-  float testFloat_{0.0};
   double testDouble_{0.0};
   std::string testShortString_;
   std::string testLongString_;
@@ -330,7 +333,18 @@ class TestRequest : public carbon::RequestCommon {
   std::map<std::string, std::vector<uint16_t>> testComplexMap_;
   std::unordered_set<std::string> testUSet_;
   std::set<uint64_t> testSet_;
+  folly::Optional<bool> testOptionalBool_;
+  std::vector<folly::Optional<std::string>> testOptionalVec_;
   UserType testType_;
+  int32_t testInt32_{0};
+  uint32_t testUInt32_{0};
+  float testFloat_{0.0};
+  int16_t testInt16_{0};
+  uint16_t testUInt16_{0};
+  bool testBool_{false};
+  char testChar_{'\0'};
+  int8_t testInt8_{0};
+  uint8_t testUInt8_{0};
 };
 
 class TestReply : public carbon::ReplyCommon {
@@ -383,9 +397,9 @@ class TestReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
-  int32_t valInt32_{0};
   int64_t valInt64_{0};
+  int32_t valInt32_{0};
+  carbon::Result result_{mc_res_unknown};
 };
 
 class TestReplyStringKey;
@@ -478,7 +492,173 @@ class TestReplyStringKey : public carbon::ReplyCommon {
   carbon::Result result_{mc_res_unknown};
 };
 
-} // test
-} // carbon
+class TestOptionalBool {
+ public:
+  static constexpr bool hasExptime = false;
+  static constexpr bool hasFlags = false;
+  static constexpr bool hasKey = false;
+  static constexpr bool hasValue = false;
+
+  TestOptionalBool() = default;
+  TestOptionalBool(const TestOptionalBool&) = default;
+  TestOptionalBool& operator=(const TestOptionalBool&) = default;
+  TestOptionalBool(TestOptionalBool&&) = default;
+  TestOptionalBool& operator=(TestOptionalBool&&) = default;
+
+  const folly::Optional<bool>& optionalBool() const {
+    return optionalBool_;
+  }
+  folly::Optional<bool>& optionalBool() {
+    return optionalBool_;
+  }
+  uint64_t flags() const {
+    return 0;
+  }
+  int32_t exptime() const {
+    return 0;
+  }
+
+  void serialize(carbon::CarbonProtocolWriter& writer) const;
+
+  void deserialize(carbon::CarbonProtocolReader& reader);
+
+  template <class V>
+  void visitFields(V&& v);
+  template <class V>
+  void visitFields(V&& v) const;
+
+ private:
+  folly::Optional<bool> optionalBool_;
+};
+
+class TestOptionalUnion {
+ private:
+  using _IdTypeMap = carbon::List<
+      facebook::memcache::KV<1, folly::Optional<int64_t>>,
+      facebook::memcache::KV<2, folly::Optional<bool>>,
+      facebook::memcache::KV<3, folly::Optional<std::string>>>;
+
+ public:
+  TestOptionalUnion() = default;
+  TestOptionalUnion(const TestOptionalUnion&) = default;
+  TestOptionalUnion& operator=(const TestOptionalUnion&) = default;
+  TestOptionalUnion(TestOptionalUnion&&) = default;
+  TestOptionalUnion& operator=(TestOptionalUnion&&) = default;
+
+  uint32_t which() const {
+    return _which_;
+  }
+
+  folly::Optional<int64_t>& umember1() {
+    if (_which_ == 0) {
+      return emplace<1>();
+    }
+    if (_which_ != 1) {
+      throw std::runtime_error(
+          "umember1 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<int64_t>>();
+  }
+  const folly::Optional<int64_t>& umember1() const {
+    if (_which_ != 1) {
+      throw std::runtime_error(
+          "umember1 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<int64_t>>();
+  }
+
+  folly::Optional<bool>& umember2() {
+    if (_which_ == 0) {
+      return emplace<2>();
+    }
+    if (_which_ != 2) {
+      throw std::runtime_error(
+          "umember2 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<bool>>();
+  }
+  const folly::Optional<bool>& umember2() const {
+    if (_which_ != 2) {
+      throw std::runtime_error(
+          "umember2 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<bool>>();
+  }
+
+  folly::Optional<std::string>& umember3() {
+    if (_which_ == 0) {
+      return emplace<3>();
+    }
+    if (_which_ != 3) {
+      throw std::runtime_error(
+          "umember3 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<std::string>>();
+  }
+  const folly::Optional<std::string>& umember3() const {
+    if (_which_ != 3) {
+      throw std::runtime_error(
+          "umember3 is not set in union TestOptionalUnion.");
+    }
+    return _carbon_variant.get<folly::Optional<std::string>>();
+  }
+
+  template <
+      uint32_t id,
+      class C = typename carbon::FindByKey<id, _IdTypeMap>::type>
+  C& get() {
+    if (id != _which_) {
+      throw std::runtime_error("Type id is not set in union SimpleUnion.");
+    }
+    return _carbon_variant.get<C>();
+  }
+
+  template <
+      uint32_t id,
+      class C = typename carbon::FindByKey<id, _IdTypeMap>::type>
+  const C& get() const {
+    if (id != _which_) {
+      throw std::runtime_error("Type id is not set in union SimpleUnion.");
+    }
+    return _carbon_variant.get<C>();
+  }
+
+  /* Note: Emplace invalidates all previous accessor references.
+   * Please exercise caution.
+   */
+  template <
+      uint32_t id,
+      class... Args,
+      class C = typename carbon::FindByKey<id, _IdTypeMap>::type>
+  C& emplace(Args&&... args) {
+    _which_ = id;
+    return _carbon_variant.emplace<C>(std::forward<Args>(args)...);
+  }
+
+  void serialize(carbon::CarbonProtocolWriter& writer) const;
+
+  void deserialize(carbon::CarbonProtocolReader& reader);
+
+  template <class V>
+  void visitFields(V&& v);
+  template <class V>
+  void visitFields(V&& v) const;
+  template <class V>
+  void foreachMember(V&& v);
+  template <class V>
+  void foreachMember(V&& v) const;
+
+ private:
+  carbon::Variant<
+      folly::Optional<int64_t>,
+      folly::Optional<bool>,
+      folly::Optional<std::string>>
+      _carbon_variant;
+
+  uint32_t _which_{0};
+};
+
+} // namespace test
+} // namespace carbon
 
 #include "CarbonTestMessages-inl.h"

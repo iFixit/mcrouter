@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2015, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -226,6 +226,15 @@ MCROUTER_OPTION_INTEGER(
     "set TCP KEEPALIVE idle parameter in seconds")
 
 MCROUTER_OPTION_INTEGER(
+    int,
+    max_no_flush_event_loops,
+    5,
+    "max-no-flush-event-loops",
+    no_short,
+    "Maximum number of non-blocking event loops before we flush batched "
+    "requests")
+
+MCROUTER_OPTION_INTEGER(
     unsigned int,
     reset_inactive_connection_interval,
     60000,
@@ -296,24 +305,31 @@ MCROUTER_OPTION_INTEGER(
 
 MCROUTER_OPTION_STRING(
     pem_cert_path,
-    "",
+    facebook::memcache::mcrouter::getDefaultPemCertPath(),
     "pem-cert-path",
     no_short,
     "Path of pem-style certificate for ssl")
 
 MCROUTER_OPTION_STRING(
     pem_key_path,
-    "",
+    facebook::memcache::mcrouter::getDefaultPemCertKey(),
     "pem-key-path",
     no_short,
     "Path of pem-style key for ssl")
 
 MCROUTER_OPTION_STRING(
     pem_ca_path,
-    "",
+    MCROUTER_DEFAULT_CA_PATH,
     "pem-ca-path",
     no_short,
     "Path of pem-style CA cert for ssl")
+
+MCROUTER_OPTION_STRING(
+    ssl_service_identity,
+    "",
+    "ssl-service-identity",
+    no_short,
+    "The service identity of the destination service when SSL is used")
 
 MCROUTER_OPTION_TOGGLE(
     enable_qos,
@@ -685,6 +701,30 @@ MCROUTER_OPTION_INTEGER(
     no_long,
     no_short,
     "If non-zero use this port while logging to async log")
+
+MCROUTER_OPTION_TOGGLE(
+    enable_send_to_main_shard_split,
+    true,
+    "disable-send-to-main-shard-split",
+    no_short,
+    "DEPRECATED. No longer supported/needed")
+
+MCROUTER_OPTION_INTEGER(
+    size_t,
+    max_shadow_token_map_size,
+    1024,
+    "max-shadow-token-map-size",
+    no_short,
+    "Maximum size of LRU cache mapping normal lease tokens to shadow lease"
+    " tokens. High rates of shadowing of lease operations may require a limit"
+    " higher than the default. 0 disables limiting of map size.")
+
+MCROUTER_OPTION_TOGGLE(
+    enable_ssl_tfo,
+    false,
+    "enable-ssl-tfo",
+    no_short,
+    "enable TFO when connecting/accepting via SSL")
 
 #ifdef ADDITIONAL_OPTIONS_FILE
 #include ADDITIONAL_OPTIONS_FILE

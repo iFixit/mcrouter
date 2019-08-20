@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -14,19 +14,20 @@
 
 #include <gtest/gtest.h>
 
+#include "mcrouter/lib/HashSelector.h"
 #include "mcrouter/lib/mc/msg.h"
 #include "mcrouter/lib/routes/AllAsyncRoute.h"
 #include "mcrouter/lib/routes/AllFastestRoute.h"
 #include "mcrouter/lib/routes/AllInitialRoute.h"
 #include "mcrouter/lib/routes/AllMajorityRoute.h"
 #include "mcrouter/lib/routes/AllSyncRoute.h"
-#include "mcrouter/lib/routes/ErrorRoute.h"
-#include "mcrouter/lib/routes/HashRoute.h"
 #include "mcrouter/lib/routes/NullRoute.h"
+#include "mcrouter/lib/routes/SelectionRoute.h"
 #include "mcrouter/lib/test/RouteHandleTestUtil.h"
 #include "mcrouter/lib/test/TestRouteHandle.h"
 
 using namespace facebook::memcache;
+using namespace facebook::memcache::mcrouter;
 
 using std::make_unique;
 using std::make_shared;
@@ -86,12 +87,6 @@ TEST(routeHandleTest, nullPrepend) {
   req.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "value");
   auto reply = rh.route(std::move(req));
   EXPECT_EQ(mc_res_notstored, reply.result());
-}
-
-TEST(routeHandleTest, error) {
-  TestRouteHandle<ErrorRoute<TestRouteHandleIf>> rh;
-  auto reply = rh.route(McGetRequest("key"));
-  EXPECT_TRUE(isErrorResult(reply.result()));
 }
 
 TEST(routeHandleTest, allSync) {
@@ -314,13 +309,14 @@ TEST(routeHandleTest, hashNoSalt) {
       make_shared<TestHandle>(GetRouteTestData(mc_res_found, "b")),
       make_shared<TestHandle>(GetRouteTestData(mc_res_found, "c")),
   };
+  auto outOfRangeRh = createNullRoute<typename TestRouterInfo::RouteHandleIf>();
 
   TestFiberManager fm;
 
-  TestRouteHandle<HashRoute<TestRouteHandleIf, HashFunc>> rh(
+  TestRouteHandle<SelectionRoute<TestRouterInfo, HashSelector<HashFunc>>> rh(
       get_route_handles(test_handles),
-      /* salt= */ "",
-      HashFunc(test_handles.size()));
+      HashSelector<HashFunc>(/* salt= */ "", HashFunc(test_handles.size())),
+      std::move(outOfRangeRh));
 
   fm.run([&]() {
     auto reply = rh.route(McGetRequest("0"));
@@ -344,13 +340,14 @@ TEST(routeHandleTest, hashSalt) {
       make_shared<TestHandle>(GetRouteTestData(mc_res_found, "b")),
       make_shared<TestHandle>(GetRouteTestData(mc_res_found, "c")),
   };
+  auto outOfRangeRh = createNullRoute<typename TestRouterInfo::RouteHandleIf>();
 
   TestFiberManager fm;
 
-  TestRouteHandle<HashRoute<TestRouteHandleIf, HashFunc>> rh(
+  TestRouteHandle<SelectionRoute<TestRouterInfo, HashSelector<HashFunc>>> rh(
       get_route_handles(test_handles),
-      /* salt= */ "1",
-      HashFunc(test_handles.size()));
+      HashSelector<HashFunc>(/* salt= */ "1", HashFunc(test_handles.size())),
+      std::move(outOfRangeRh));
 
   fm.run([&]() {
     auto reply = rh.route(McGetRequest("0"));

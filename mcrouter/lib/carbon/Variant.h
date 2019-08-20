@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -41,7 +41,7 @@ class Variant {
     }
 
     const int32_t otherWhich = other.which_;
-    if (otherWhich >= 0 && otherWhich < sizeof...(Ts)) {
+    if (otherWhich >= 0 && static_cast<size_t>(otherWhich) < sizeof...(Ts)) {
       dispatcher[otherWhich](*this, other);
     }
     return *this;
@@ -132,10 +132,16 @@ class Variant {
 
   std::type_index which() const {
     static constexpr std::type_index types[sizeof...(Ts)] = {typeid(Ts)...};
-    if (which_ >= 0 && which_ < sizeof...(Ts)) {
+    if (which_ >= 0 && static_cast<size_t>(which_) < sizeof...(Ts)) {
       return types[which_];
     }
     return typeid(void);
+  }
+
+  // When writing a Carbon structure visitor, it may be more efficient (avoiding
+  // RTTI) to use whichId() than which(), while remaining just as safe.
+  int32_t whichId() const {
+    return which_;
   }
 
  private:

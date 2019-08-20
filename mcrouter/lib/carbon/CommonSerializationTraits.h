@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -54,20 +54,46 @@ struct SerializationTraits<Keys<Storage>> {
   }
 };
 
-// SerializationTraits specialization for folly::Optional<>
 template <class T>
 struct SerializationTraits<folly::Optional<T>> {
-  static constexpr carbon::FieldType kWireType =
-      detail::TypeToField<T>::fieldType;
+  static constexpr carbon::FieldType kWireType = carbon::FieldType::Struct;
+
+  using value_type = typename folly::Optional<T>::value_type;
 
   static folly::Optional<T> read(carbon::CarbonProtocolReader& reader) {
-    return folly::Optional<T>(reader.readRaw<T>());
+    folly::Optional<T> opt;
+    reader.readStructBegin();
+    while (true) {
+      const auto pr = reader.readFieldHeader();
+      const auto fieldType = pr.first;
+      const auto fieldId = pr.second;
+
+      if (fieldType == carbon::FieldType::Stop) {
+        break;
+      }
+
+      switch (fieldId) {
+        case 1: {
+          reader.readField(opt, fieldType);
+          break;
+        }
+        default: {
+          reader.skip(fieldType);
+          break;
+        }
+      }
+    }
+    reader.readStructEnd();
+    return opt;
   }
 
   static void write(
       const folly::Optional<T>& opt,
       carbon::CarbonProtocolWriter& writer) {
-    writer.writeRaw(*opt);
+    writer.writeStructBegin();
+    writer.writeField(1 /* field id */, opt);
+    writer.writeStructEnd();
+    writer.writeStop();
   }
 
   static bool isEmpty(const folly::Optional<T>& opt) {

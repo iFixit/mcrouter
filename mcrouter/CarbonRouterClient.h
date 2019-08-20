@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -123,7 +123,7 @@ class CarbonRouterClient : public CarbonRouterClientBase {
   CarbonRouterClient& operator=(const CarbonRouterClient<RouterInfo>&) = delete;
   CarbonRouterClient& operator=(CarbonRouterClient<RouterInfo>&&) = delete;
 
-  ~CarbonRouterClient();
+  ~CarbonRouterClient() override;
 
  private:
   std::weak_ptr<CarbonRouterInstance<RouterInfo>> router_;

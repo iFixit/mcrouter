@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -59,15 +59,10 @@ std::shared_ptr<ProxyDestination> ProxyDestinationMap::emplace(
     std::chrono::milliseconds timeout,
     uint64_t qosClass,
     uint64_t qosPath,
-    std::string routerInfoName) {
+    folly::StringPiece routerInfoName) {
   auto key = genProxyDestinationKey(*ap, timeout);
   auto destination = ProxyDestination::create(
-      *proxy_,
-      std::move(ap),
-      timeout,
-      qosClass,
-      qosPath,
-      std::move(routerInfoName));
+      *proxy_, std::move(ap), timeout, qosClass, qosPath, routerInfoName);
   {
     std::lock_guard<std::mutex> lck(destinationsLock_);
     auto destIt = destinations_.emplace(key, destination);

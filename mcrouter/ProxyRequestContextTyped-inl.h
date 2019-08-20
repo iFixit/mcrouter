@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,6 +9,8 @@
  */
 #include "mcrouter/Proxy.h"
 #include "mcrouter/lib/McKey.h"
+#include "mcrouter/lib/fbi/cpp/TypeList.h"
+#include "mcrouter/lib/network/CarbonMessageList.h"
 #include "mcrouter/lib/network/gen/Memcache.h"
 
 namespace facebook {
@@ -33,7 +35,7 @@ class ProxyRequestContextTypedWithCallback
         f_(std::forward<F>(f)) {}
 
  protected:
-  void sendReplyImpl(ReplyT<Request>&& reply) override final {
+  void sendReplyImpl(ReplyT<Request>&& reply) final {
     auto req = this->req_;
     fiber_local<RouterInfo>::runWithoutLocals(
         [this, req, &reply]() { f_(*req, std::move(reply)); });
@@ -49,8 +51,11 @@ template <class RouterInfo, class Request>
 bool precheckKey(
     ProxyRequestContextTyped<RouterInfo, Request>& preq,
     const Request& req) {
+  constexpr bool kIsMemcacheRequest =
+      ListContains<McRequestList, Request>::value;
+
   auto key = req.key().fullKey();
-  auto err = isKeyValid(key);
+  auto err = isKeyValid<kIsMemcacheRequest>(key);
   if (err != mc_req_err_valid) {
     ReplyT<Request> reply(mc_res_local_error);
     carbon::setMessageIfPresent(reply, mc_req_err_to_string(err));

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,11 +13,15 @@
 
 #include "mcrouter/lib/Ch3HashFunc.h"
 #include "mcrouter/lib/Crc32HashFunc.h"
+#include "mcrouter/lib/HashSelector.h"
+#include "mcrouter/lib/RendezvousHashFunc.h"
+#include "mcrouter/lib/SelectionRouteFactory.h"
 #include "mcrouter/lib/WeightedCh3HashFunc.h"
 #include "mcrouter/lib/config/RouteHandleFactory.h"
-#include "mcrouter/lib/routes/HashRoute.h"
 #include "mcrouter/lib/routes/NullRoute.h"
+#include "mcrouter/lib/routes/SelectionRoute.h"
 #include "mcrouter/routes/LatestRoute.h"
+#include "mcrouter/routes/LoadBalancerRoute.h"
 #include "mcrouter/routes/McRouteHandleBuilder.h"
 #include "mcrouter/routes/ShardHashFunc.h"
 
@@ -25,82 +29,20 @@ namespace facebook {
 namespace memcache {
 namespace mcrouter {
 
-namespace detail {
-
-template <class RouterInfo>
-std::shared_ptr<typename RouterInfo::RouteHandleIf> makeHashRouteCrc32(
-    std::vector<std::shared_ptr<typename RouterInfo::RouteHandleIf>> rh,
-    std::string salt) {
-  auto n = rh.size();
-  if (n == 0) {
-    return createNullRoute<typename RouterInfo::RouteHandleIf>();
-  }
-  if (n == 1) {
-    return std::move(rh[0]);
-  }
-
-  return makeRouteHandle<
-      typename RouterInfo::RouteHandleIf,
-      HashRoute,
-      Crc32HashFunc>(std::move(rh), std::move(salt), Crc32HashFunc(n));
+template <class HashFunc>
+HashSelector<HashFunc> createHashSelector(std::string salt, HashFunc func) {
+  return HashSelector<HashFunc>(std::move(salt), std::move(func));
 }
 
-template <class RouterInfo>
-std::shared_ptr<typename RouterInfo::RouteHandleIf> makeHashRouteCh3(
-    std::vector<std::shared_ptr<typename RouterInfo::RouteHandleIf>> rh,
-    std::string salt) {
-  auto n = rh.size();
-  if (n == 0) {
-    return createNullRoute<typename RouterInfo::RouteHandleIf>();
-  }
-  if (n == 1) {
-    return std::move(rh[0]);
-  }
-  return makeRouteHandle<
-      typename RouterInfo::RouteHandleIf,
-      HashRoute,
-      Ch3HashFunc>(std::move(rh), std::move(salt), Ch3HashFunc(n));
-}
-
-template <class RouterInfo>
-std::shared_ptr<typename RouterInfo::RouteHandleIf> makeHashRouteConstShard(
-    std::vector<std::shared_ptr<typename RouterInfo::RouteHandleIf>> rh,
-    std::string salt) {
-  auto n = rh.size();
-  if (n == 0) {
-    return createNullRoute<typename RouterInfo::RouteHandleIf>();
-  }
-  if (n == 1) {
-    return std::move(rh[0]);
-  }
-
-  return makeRouteHandle<
-      typename RouterInfo::RouteHandleIf,
-      HashRoute,
-      ConstShardHashFunc>(
-      std::move(rh), std::move(salt), ConstShardHashFunc(n));
-}
-
-template <class RouterInfo>
-std::shared_ptr<typename RouterInfo::RouteHandleIf> makeHashRouteWeightedCh3(
-    std::vector<std::shared_ptr<typename RouterInfo::RouteHandleIf>> rh,
+template <class RouterInfo, class HashFunc>
+typename RouterInfo::RouteHandlePtr createHashRoute(
+    std::vector<typename RouterInfo::RouteHandlePtr> rh,
     std::string salt,
-    WeightedCh3HashFunc func) {
-  auto n = rh.size();
-  if (n == 0) {
-    return createNullRoute<typename RouterInfo::RouteHandleIf>();
-  }
-  if (n == 1) {
-    return std::move(rh[0]);
-  }
-
-  return makeRouteHandle<
-      typename RouterInfo::RouteHandleIf,
-      HashRoute,
-      WeightedCh3HashFunc>(std::move(rh), std::move(salt), std::move(func));
+    HashFunc func) {
+  return createSelectionRoute<RouterInfo, HashSelector<HashFunc>>(
+      std::move(rh),
+      createHashSelector<HashFunc>(std::move(salt), std::move(func)));
 }
-
-} // detail
 
 template <class RouterInfo>
 std::shared_ptr<typename RouterInfo::RouteHandleIf> createHashRoute(
@@ -120,20 +62,50 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> createHashRoute(
     }
   }
 
+  auto n = rh.size();
+  if (n == 0) {
+    return createNullRoute<typename RouterInfo::RouteHandleIf>();
+  }
+  if (n == 1) {
+    return std::move(rh[0]);
+  }
+
   if (funcType == Ch3HashFunc::type()) {
-    return detail::makeHashRouteCh3<RouterInfo>(std::move(rh), std::move(salt));
+    return createHashRoute<RouterInfo, Ch3HashFunc>(
+        std::move(rh), std::move(salt), Ch3HashFunc(n));
   } else if (funcType == Crc32HashFunc::type()) {
-    return detail::makeHashRouteCrc32<RouterInfo>(
-        std::move(rh), std::move(salt));
+    return createHashRoute<RouterInfo, Crc32HashFunc>(
+        std::move(rh), std::move(salt), Crc32HashFunc(n));
   } else if (funcType == WeightedCh3HashFunc::type()) {
-    WeightedCh3HashFunc func{json, rh.size()};
-    return detail::makeHashRouteWeightedCh3<RouterInfo>(
+    WeightedCh3HashFunc func{json, n};
+    return createHashRoute<RouterInfo, WeightedCh3HashFunc>(
         std::move(rh), std::move(salt), std::move(func));
   } else if (funcType == ConstShardHashFunc::type()) {
-    return detail::makeHashRouteConstShard<RouterInfo>(
-        std::move(rh), std::move(salt));
+    return createHashRoute<RouterInfo, ConstShardHashFunc>(
+        std::move(rh), std::move(salt), ConstShardHashFunc(n));
+  } else if (funcType == RendezvousHashFunc::type()) {
+    std::vector<folly::StringPiece> endpoints;
+
+    auto jtags = json.get_ptr("tags");
+    checkLogic(jtags, "HashRoute: tags needed for Rendezvous hash route");
+    checkLogic(jtags->isArray(), "HashRoute: tags is not an array");
+    checkLogic(
+        jtags->size() == rh.size(),
+        "HashRoute: number of tags doesn't match number of route handles");
+
+    for (const auto& jtag : *jtags) {
+      checkLogic(jtag.isString(), "HashRoute: tag is not a string");
+      endpoints.push_back(jtag.stringPiece());
+    }
+
+    return createHashRoute<RouterInfo, RendezvousHashFunc>(
+        std::move(rh),
+        std::move(salt),
+        RendezvousHashFunc(std::move(endpoints)));
   } else if (funcType == "Latest") {
     return createLatestRoute<RouterInfo>(json, std::move(rh), threadId);
+  } else if (funcType == "LoadBalancer") {
+    return createLoadBalancerRoute<RouterInfo>(json, std::move(rh));
   }
   throwLogic("Unknown hash function: {}", funcType);
 }

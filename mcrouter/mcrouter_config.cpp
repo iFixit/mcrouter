@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -17,13 +17,19 @@
 #include "mcrouter/config.h"
 #include "mcrouter/flavor.h"
 #include "mcrouter/options.h"
-#include "mcrouter/routes/McExtraRouteHandleProvider.h"
 #include "mcrouter/routes/McrouterRouteHandle.h"
 #include "mcrouter/standalone_options.h"
 
 namespace facebook {
 namespace memcache {
 namespace mcrouter {
+
+bool readLibmcrouterFlavor(
+    folly::StringPiece flavor,
+    std::unordered_map<std::string, std::string>& options) {
+  std::unordered_map<std::string, std::string> standaloneOptions;
+  return read_standalone_flavor(flavor.str(), options, standaloneOptions);
+}
 
 bool read_standalone_flavor(
     const std::string& flavor,
@@ -43,11 +49,6 @@ std::unique_ptr<ConfigApi> createConfigApi(const McrouterOptions& opts) {
 
 std::string performOptionSubstitution(std::string str) {
   return str;
-}
-
-std::unique_ptr<ExtraRouteHandleProviderIf<MemcacheRouterInfo>>
-createExtraRouteHandleProvider() {
-  return std::make_unique<McExtraRouteHandleProvider<MemcacheRouterInfo>>();
 }
 
 std::unique_ptr<McrouterLogger> createMcrouterLogger(
@@ -119,6 +120,13 @@ std::string getBinPath(folly::StringPiece name) {
     return "./mcrouter/lib/network/mock_mc_server";
   }
   return "unknown";
+}
+
+std::string getDefaultPemCertPath() {
+  return "";
+}
+std::string getDefaultPemCertKey() {
+  return "";
 }
 
 } // mcrouter

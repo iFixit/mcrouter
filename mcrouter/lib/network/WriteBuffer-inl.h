@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -56,6 +56,7 @@ WriteBuffer::prepareTyped(
           codecIdRange,
           compressionCodecMap,
           ctx_->getDropProbability(),
+          ctx_->getServerLoad(),
           iovsBegin_,
           iovsCount_);
 
@@ -86,20 +87,16 @@ WriteBuffer::prepareTyped(
 
   typeId_ = static_cast<uint32_t>(Reply::typeId);
 
-  // The current congestion control only supports mc_caret_protocol.
-  // May extend to other protocals in the future.
-  const auto dropProbability = ctx_->session().getCpuController()
-      ? ctx_->session().getCpuController()->getDropProbability()
-      : 0.0;
-
   return caretReply_.prepare(
       std::move(reply),
       ctx_->reqid_,
       codecIdRange,
       compressionCodecMap,
-      dropProbability,
+      ctx_->getDropProbability(),
+      ctx_->getServerLoad(),
       iovsBegin_,
       iovsCount_);
 }
-}
-} // facebook::memcache
+
+} // memcache
+} // facebook

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,27 +13,30 @@
 
 #include <memory>
 
-#include <folly/EvictingCacheMap.h>
 #include <folly/SingletonThreadLocal.h>
+#include <folly/container/EvictingCacheMap.h>
 #include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/EventBase.h>
 
 #include "mcrouter/lib/debug/FifoManager.h"
 #include "mcrouter/lib/fbi/cpp/LogFailure.h"
+#include "mcrouter/lib/network/ThreadLocalSSLContextProvider.h"
 
 namespace facebook {
 namespace memcache {
 
 constexpr size_t kReadBufferSizeMin = 256;
 constexpr size_t kReadBufferSizeMax = 4096;
+constexpr size_t kStackIovecs = 128;
+constexpr size_t kMaxBatchSize = 24576 /* 24KB */;
 
 namespace {
 class OnEventBaseDestructionCallback : public folly::EventBase::LoopCallback {
  public:
   explicit OnEventBaseDestructionCallback(AsyncMcClientImpl& client)
       : client_(client) {}
-  ~OnEventBaseDestructionCallback() {}
-  void runLoopCallback() noexcept override final {
+  ~OnEventBaseDestructionCallback() override {}
+  void runLoopCallback() noexcept final {
     client_.closeNow();
   }
 
@@ -49,55 +52,53 @@ struct GoAwayContext : public folly::AsyncTransportWrapper::WriteCallback {
   explicit GoAwayContext(const CodecIdRange& supportedCodecs)
       : data(message, 0, mc_caret_protocol, supportedCodecs) {}
 
-  void writeSuccess() noexcept override final {
+  void writeSuccess() noexcept final {
     auto self = std::move(selfPtr);
     self.reset();
   }
-  void writeErr(size_t, const folly::AsyncSocketException&) noexcept override
-      final {
+  void writeErr(size_t, const folly::AsyncSocketException&) noexcept final {
     auto self = std::move(selfPtr);
     self.reset();
   }
 };
+
+inline size_t calculateIovecsTotalSize(const struct iovec* iovecs, size_t num) {
+  size_t size = 0;
+  while (num) {
+    size += iovecs->iov_len;
+    ++iovecs;
+    --num;
+  }
+  return size;
+}
+
+std::string getServiceIdentity(const ConnectionOptions& opts) {
+  return opts.sslServiceIdentity.empty() ? opts.accessPoint->toHostPortString()
+                                         : opts.sslServiceIdentity;
+}
 } // anonymous
 
-/**
- * A callback class for network writing.
- *
- * We use it instead of simple std::function, because it will safely cancel
- * callback event when destructed.
- */
-class AsyncMcClientImpl::WriterLoop : public folly::EventBase::LoopCallback {
- public:
-  explicit WriterLoop(AsyncMcClientImpl& client) : client_(client) {}
-  ~WriterLoop() {}
-  void runLoopCallback() noexcept override final {
-    // Delay this write until the end of current loop (e.g. after
-    // runActiveFibers() callback). That way we achieve better batching without
-    // affecting latency.
-    if (!rescheduled_) {
-      rescheduled_ = true;
-      client_.eventBase_.runInLoop(this, /* thisIteration */ true);
-      return;
-    }
-    rescheduled_ = false;
-    client_.pushMessages();
+void AsyncMcClientImpl::WriterLoop::runLoopCallback() noexcept {
+  // Delay this write until the end of current loop (e.g. after
+  // runActiveFibers() callback). That way we achieve better batching without
+  // affecting latency.
+  if (!client_.flushList_ && !rescheduled_) {
+    rescheduled_ = true;
+    client_.eventBase_.runInLoop(this, /* thisIteration */ true);
+    return;
   }
-
- private:
-  bool rescheduled_{false};
-  AsyncMcClientImpl& client_;
-};
+  rescheduled_ = false;
+  client_.pushMessages();
+}
 
 AsyncMcClientImpl::AsyncMcClientImpl(
     folly::VirtualEventBase& eventBase,
     ConnectionOptions options)
     : eventBase_(eventBase.getEventBase()),
+      queue_(options.accessPoint->getProtocol() != mc_ascii_protocol),
+      outOfOrder_(options.accessPoint->getProtocol() != mc_ascii_protocol),
+      writer_(*this),
       connectionOptions_(std::move(options)),
-      outOfOrder_(
-          connectionOptions_.accessPoint->getProtocol() != mc_ascii_protocol),
-      queue_(outOfOrder_),
-      writer_(std::make_unique<WriterLoop>(*this)),
       eventBaseDestructionCallback_(
           std::make_unique<OnEventBaseDestructionCallback>(*this)) {
   eventBase.runOnDestruction(eventBaseDestructionCallback_.get());
@@ -129,7 +130,7 @@ void AsyncMcClientImpl::closeNow() {
 }
 
 void AsyncMcClientImpl::setStatusCallbacks(
-    std::function<void()> onUp,
+    std::function<void(const folly::AsyncSocket&)> onUp,
     std::function<void(ConnectionDownReason)> onDown) {
   DestructorGuard dg(this);
 
@@ -137,7 +138,7 @@ void AsyncMcClientImpl::setStatusCallbacks(
       ConnectionStatusCallbacks{std::move(onUp), std::move(onDown)};
 
   if (connectionState_ == ConnectionState::UP && statusCallbacks_.onUp) {
-    statusCallbacks_.onUp();
+    statusCallbacks_.onUp(*socket_);
   }
 }
 
@@ -207,16 +208,19 @@ size_t AsyncMcClientImpl::getNumToSend() const {
 }
 
 void AsyncMcClientImpl::scheduleNextWriterLoop() {
-  if (connectionState_ == ConnectionState::UP && !writeScheduled_ &&
+  if (connectionState_ == ConnectionState::UP &&
+      !writer_.isLoopCallbackScheduled() &&
       (getNumToSend() > 0 || pendingGoAwayReply_)) {
-    writeScheduled_ = true;
-    eventBase_.runInLoop(writer_.get());
+    if (flushList_) {
+      flushList_->push_back(writer_);
+    } else {
+      eventBase_.runInLoop(&writer_);
+    }
   }
 }
 
 void AsyncMcClientImpl::cancelWriterCallback() {
-  writeScheduled_ = false;
-  writer_->cancelLoopCallback();
+  writer_.cancelLoopCallback();
 }
 
 void AsyncMcClientImpl::pushMessages() {
@@ -229,10 +233,29 @@ void AsyncMcClientImpl::pushMessages() {
     requestStatusCallbacks_.onWrite(numToSend);
   }
 
+  std::array<struct iovec, kStackIovecs> iovecs;
+  size_t iovsUsed = 0;
+  size_t batchSize = 0;
+  McClientRequestContextBase* tail = nullptr;
+
+  auto sendBatchFun = [this](
+                          McClientRequestContextBase* tailReq,
+                          const struct iovec* iov,
+                          size_t iovCnt,
+                          bool last) {
+    tailReq->isBatchTail = true;
+    socket_->writev(
+        this,
+        iov,
+        iovCnt,
+        last ? folly::WriteFlags::NONE : folly::WriteFlags::CORK);
+    return connectionState_ == ConnectionState::UP;
+  };
+
   while (getPendingRequestCount() != 0 && numToSend > 0 &&
          /* we might be already not UP, because of failed writev */
          connectionState_ == ConnectionState::UP) {
-    auto& req = queue_.markNextAsSending();
+    auto& req = queue_.peekNextPending();
 
     auto iov = req.reqContext.getIovs();
     auto iovcnt = req.reqContext.getIovsCount();
@@ -240,11 +263,51 @@ void AsyncMcClientImpl::pushMessages() {
       debugFifo_.startMessage(MessageDirection::Sent, req.reqContext.typeId());
       debugFifo_.writeData(iov, iovcnt);
     }
-    socket_->writev(
-        this,
-        iov,
-        iovcnt,
-        numToSend == 1 ? folly::WriteFlags::NONE : folly::WriteFlags::CORK);
+
+    if (iovsUsed + iovcnt > kStackIovecs && iovsUsed) {
+      // We're out of inline iovecs, flush what we batched.
+      if (!sendBatchFun(tail, iovecs.data(), iovsUsed, false)) {
+        break;
+      }
+      iovsUsed = 0;
+      batchSize = 0;
+    }
+
+    if (iovcnt >= kStackIovecs || (iovsUsed == 0 && numToSend == 1)) {
+      // Req is either too big to batch or it's the last one, so just send it
+      // alone.
+      queue_.markNextAsSending();
+      sendBatchFun(&req, iov, iovcnt, numToSend == 1);
+    } else {
+      auto size = calculateIovecsTotalSize(iov, iovcnt);
+
+      if (size + batchSize > kMaxBatchSize && iovsUsed) {
+        // We already accumulated too much data, flush what we have.
+        if (!sendBatchFun(tail, iovecs.data(), iovsUsed, false)) {
+          break;
+        }
+        iovsUsed = 0;
+        batchSize = 0;
+      }
+
+      queue_.markNextAsSending();
+      if (size >= kMaxBatchSize || (iovsUsed == 0 && numToSend == 1)) {
+        // Req is either too big to batch or it's the last one, so just send it
+        // alone.
+        sendBatchFun(&req, iov, iovcnt, numToSend == 1);
+      } else {
+        memcpy(iovecs.data() + iovsUsed, iov, sizeof(struct iovec) * iovcnt);
+        iovsUsed += iovcnt;
+        batchSize += size;
+        tail = &req;
+
+        if (numToSend == 1) {
+          // This was the last request flush everything.
+          sendBatchFun(tail, iovecs.data(), iovsUsed, true);
+        }
+      }
+    }
+
     --numToSend;
   }
   if (connectionState_ == ConnectionState::UP && pendingGoAwayReply_) {
@@ -254,7 +317,6 @@ void AsyncMcClientImpl::pushMessages() {
     sendGoAwayReply();
   }
   pendingGoAwayReply_ = false;
-  writeScheduled_ = false;
   scheduleNextWriterLoop();
 }
 
@@ -417,54 +479,6 @@ folly::AsyncSocket::OptionMap createSocketOptions(
 
   return options;
 }
-
-/////////////////////////////  SslSessionCache //////////////////////////////
-
-class SslSessionDestructor {
- public:
-  void operator()(SSL_SESSION* session) {
-    if (session != nullptr) {
-      SSL_SESSION_free(session);
-    }
-  }
-};
-
-using SslSessionUniquePtr = std::unique_ptr<SSL_SESSION, SslSessionDestructor>;
-
-using SslSessionCache =
-    folly::EvictingCacheMap<std::string, SslSessionUniquePtr>;
-
-SslSessionCache& sslSessionCache() {
-  constexpr size_t kCacheSize = 10000;
-  static folly::SingletonThreadLocal<SslSessionCache> cache(
-      []() { return new SslSessionCache(kCacheSize); });
-  return cache.get();
-}
-
-std::string getSessionCacheKey(const AccessPoint& ap) {
-  return ap.toHostPortString();
-}
-
-void storeSslSession(const AccessPoint& ap, SslSessionUniquePtr session) {
-  const auto& key = getSessionCacheKey(ap);
-  if (session != nullptr) {
-    sslSessionCache().set(key, std::move(session));
-  }
-}
-
-void removeSslSession(const AccessPoint& ap) {
-  const auto& key = getSessionCacheKey(ap);
-  sslSessionCache().erase(key);
-}
-
-SSL_SESSION* getSslSession(const AccessPoint& ap) {
-  const auto& key = getSessionCacheKey(ap);
-  auto it = sslSessionCache().find(key);
-  return it != sslSessionCache().end() ? it->second.get() : nullptr;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
 } // anonymous namespace
 
 void AsyncMcClientImpl::attemptConnection() {
@@ -472,11 +486,20 @@ void AsyncMcClientImpl::attemptConnection() {
   // expensive SSL code. This should be always executed on main context.
   folly::fibers::runInMainContext([this] {
     assert(connectionState_ == ConnectionState::DOWN);
-
     connectionState_ = ConnectionState::CONNECTING;
     pendingGoAwayReply_ = false;
 
     if (connectionOptions_.sslContextProvider) {
+      // Unix Domain Sockets do not work with SSL because
+      // the protocol is not implemented for Unix Domain
+      // Sockets. Trying to use SSL with Unix Domain Sockets
+      // will result in protocol error.
+      if (connectionOptions_.accessPoint->isUnixDomainSocket()) {
+        connectErr(folly::AsyncSocketException(
+            folly::AsyncSocketException::BAD_ARGS,
+            "SSL protocol is not applicable for Unix Domain Sockets"));
+        return;
+      }
       auto sslContext = connectionOptions_.sslContextProvider();
       if (!sslContext) {
         connectErr(folly::AsyncSocketException(
@@ -488,9 +511,19 @@ void AsyncMcClientImpl::attemptConnection() {
 
       auto sslSocket = new folly::AsyncSSLSocket(sslContext, &eventBase_);
       if (connectionOptions_.sessionCachingEnabled) {
-        /* If we have an existing session try to re-use */
-        auto* session = getSslSession(*connectionOptions_.accessPoint);
-        sslSocket->setSSLSession(session);
+        auto clientCtx =
+            std::dynamic_pointer_cast<ClientSSLContext>(sslContext);
+        if (clientCtx) {
+          const auto& serviceId = getServiceIdentity(connectionOptions_);
+          sslSocket->setServiceIdentity(serviceId);
+          auto session = clientCtx->getCache().getSSLSession(serviceId);
+          if (session) {
+            sslSocket->setSSLSession(session.release(), true);
+          }
+        }
+      }
+      if (connectionOptions_.tfoEnabledForSsl) {
+        sslSocket->enableTFO();
       }
       socket_.reset(sslSocket);
     } else {
@@ -499,10 +532,14 @@ void AsyncMcClientImpl::attemptConnection() {
 
     folly::SocketAddress address;
     try {
-      address = folly::SocketAddress(
-          connectionOptions_.accessPoint->getHost(),
-          connectionOptions_.accessPoint->getPort(),
-          /* allowNameLookup */ true);
+      if (connectionOptions_.accessPoint->isUnixDomainSocket()) {
+        address.setFromPath(connectionOptions_.accessPoint->getHost());
+      } else {
+        address = folly::SocketAddress(
+            connectionOptions_.accessPoint->getHost(),
+            connectionOptions_.accessPoint->getPort(),
+            /* allowNameLookup */ true);
+      }
     } catch (const std::system_error& e) {
       LOG_FAILURE(
           "AsyncMcClient", failure::Category::kBadEnvironment, "{}", e.what());
@@ -530,7 +567,7 @@ void AsyncMcClientImpl::connectSuccess() noexcept {
   connectionState_ = ConnectionState::UP;
 
   if (statusCallbacks_.onUp) {
-    statusCallbacks_.onUp();
+    statusCallbacks_.onUp(*socket_);
   }
 
   if (!connectionOptions_.debugFifoPath.empty()) {
@@ -547,11 +584,6 @@ void AsyncMcClientImpl::connectSuccess() noexcept {
       connectionOptions_.sessionCachingEnabled) {
     auto* sslSocket = socket_->getUnderlyingTransport<folly::AsyncSSLSocket>();
     assert(sslSocket != nullptr);
-    if (!sslSocket->getSSLSessionReused()) {
-      /* store the new ssl session for future re-use */
-      auto session = SslSessionUniquePtr(sslSocket->getSSLSession());
-      storeSslSession(*connectionOptions_.accessPoint, std::move(session));
-    }
   }
 
   assert(getInflightRequestCount() == 0);
@@ -572,12 +604,6 @@ void AsyncMcClientImpl::connectErr(
     const folly::AsyncSocketException& ex) noexcept {
   assert(connectionState_ == ConnectionState::CONNECTING);
   DestructorGuard dg(this);
-
-  if (connectionOptions_.sslContextProvider &&
-      connectionOptions_.sessionCachingEnabled) {
-    /* clear the ssl session from cache */
-    removeSslSession(*connectionOptions_.accessPoint);
-  }
 
   std::string errorMessage;
   if (ex.getType() == folly::AsyncSocketException::SSL_ERROR) {
@@ -616,11 +642,9 @@ void AsyncMcClientImpl::processShutdown(folly::StringPiece errorMessage) {
   DestructorGuard dg(this);
   switch (connectionState_) {
     case ConnectionState::UP: // on error, UP always transitions to ERROR state
-      if (writeScheduled_) {
-        // Cancel loop callback, or otherwise we might attempt to write
-        // something while processing error state.
-        cancelWriterCallback();
-      }
+      // Cancel loop callback, or otherwise we might attempt to write
+      // something while processing error state.
+      cancelWriterCallback();
       connectionState_ = ConnectionState::ERROR;
       // We're already in ERROR state, no need to listen for reads.
       socket_->setReadCB(nullptr);
@@ -698,8 +722,13 @@ void AsyncMcClientImpl::writeSuccess() noexcept {
       connectionState_ == ConnectionState::UP ||
       connectionState_ == ConnectionState::ERROR);
   DestructorGuard dg(this);
-  auto& req = queue_.markNextAsSent();
-  req.scheduleTimeout();
+
+  bool last;
+  do {
+    auto& req = queue_.markNextAsSent();
+    last = req.isBatchTail;
+    req.scheduleTimeout();
+  } while (!last);
 
   // It is possible that we're already processing error, but still have a
   // successfull write.
@@ -725,7 +754,13 @@ void AsyncMcClientImpl::writeErr(
 
   // We're already in an error state, so all requests in pendingReplyQueue_ will
   // be replied with an error.
-  queue_.markNextAsSent();
+
+  bool last;
+  do {
+    auto& req = queue_.markNextAsSent();
+    last = req.isBatchTail;
+  } while (!last);
+
   processShutdown(errorMessage);
 }
 

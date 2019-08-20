@@ -64,6 +64,12 @@ class HelloRequest : public carbon::RequestCommon {
   carbon::Keys<folly::IOBuf>& key() {
     return key_;
   }
+  uint64_t shardId() const {
+    return shardId_;
+  }
+  uint64_t& shardId() {
+    return shardId_;
+  }
   uint64_t flags() const {
     return 0;
   }
@@ -82,6 +88,7 @@ class HelloRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
+  uint64_t shardId_{0};
 };
 
 class HelloReply : public carbon::ReplyCommon {
@@ -152,6 +159,12 @@ class GoodbyeRequest : public carbon::RequestCommon {
   carbon::Keys<folly::IOBuf>& key() {
     return key_;
   }
+  uint64_t shardId() const {
+    return shardId_;
+  }
+  uint64_t& shardId() {
+    return shardId_;
+  }
   uint64_t flags() const {
     return 0;
   }
@@ -170,6 +183,7 @@ class GoodbyeRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
+  uint64_t shardId_{0};
 };
 
 class GoodbyeReply : public carbon::ReplyCommon {
@@ -216,10 +230,10 @@ class GoodbyeReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
 };
 
-} // hellogoodbye
+} // namespace hellogoodbye
 
 #include "HelloGoodbyeMessages-inl.h"

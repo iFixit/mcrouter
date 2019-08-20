@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -33,6 +33,10 @@ class ProxyDestinationMap;
 
 class ProxyBase {
  public:
+  using FlushList = boost::intrusive::list<
+      folly::EventBase::LoopCallback,
+      boost::intrusive::constant_time_size<false>>;
+
   template <class RouterInfo>
   ProxyBase(
       CarbonRouterInstanceBase& rtr,
@@ -101,6 +105,13 @@ class ProxyBase {
 
   virtual folly::dynamic dumpRequestStats(bool filterZeroes) const = 0;
 
+  /** Advance the request stats bin. */
+  virtual void advanceRequestStatsBin() = 0;
+
+  FlushList& flushList() {
+    return flushList_;
+  }
+
  private:
   CarbonRouterInstanceBase& router_;
   const size_t id_{0};
@@ -119,6 +130,23 @@ class ProxyBase {
       const McrouterOptions& opts);
 
  protected:
+  // A queue of callbacks for flushing requests in AsyncMcClients.
+  FlushList flushList_;
+
+  class FlushCallback : public folly::EventBase::LoopCallback {
+   public:
+    explicit FlushCallback(ProxyBase& proxy) : proxy_(proxy) {}
+    void setList(FlushList flushList) {
+      flushList_ = std::move(flushList);
+    }
+    void runLoopCallback() noexcept override final;
+
+   private:
+    ProxyBase& proxy_;
+    FlushList flushList_;
+    bool rescheduled_{false};
+  } flushCallback_;
+
   std::unique_ptr<ProxyDestinationMap> destinationMap_;
 
   /**

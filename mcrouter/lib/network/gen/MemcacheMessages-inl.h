@@ -221,11 +221,17 @@ void McLeaseGetRequest::visitFields(V&& v) {
   if (!v.visitField(1, "key", key_)) {
     return;
   }
+  if (!v.visitField(2, "flags", flags_)) {
+    return;
+  }
 }
 
 template <class V>
 void McLeaseGetRequest::visitFields(V&& v) const {
   if (!v.visitField(1, "key", key_)) {
+    return;
+  }
+  if (!v.visitField(2, "flags", flags_)) {
     return;
   }
 }
@@ -992,5 +998,5 @@ void McFlushAllReply::visitFields(V&& v) const {
   }
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

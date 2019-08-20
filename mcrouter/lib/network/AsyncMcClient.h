@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -18,6 +18,7 @@
 #include "mcrouter/lib/network/ConnectionOptions.h"
 
 namespace folly {
+class AsyncSocket;
 class EventBase;
 } // folly
 
@@ -38,9 +39,13 @@ struct ReplyStatsContext;
 class AsyncMcClient {
  public:
   using ConnectionDownReason = AsyncMcClientImpl::ConnectionDownReason;
+  using FlushList = AsyncMcClientImpl::FlushList;
 
   AsyncMcClient(folly::EventBase& eventBase, ConnectionOptions options);
   AsyncMcClient(folly::VirtualEventBase& eventBase, ConnectionOptions options);
+  ~AsyncMcClient() {
+    base_->setFlushList(nullptr);
+  }
 
   /**
    * Close connection and fail all outstanding requests immediately.
@@ -62,7 +67,7 @@ class AsyncMcClient {
    *       some requests left, for wich reply callback wasn't called yet.
    */
   void setStatusCallbacks(
-      std::function<void()> onUp,
+      std::function<void(const folly::AsyncSocket&)> onUp,
       std::function<void(ConnectionDownReason)> onDown);
 
   /**
@@ -149,6 +154,14 @@ class AsyncMcClient {
    */
   template <class Request>
   double getDropProbability() const;
+
+  /**
+   * Set external queue for managing flush callbacks. By default we'll use
+   * EventBase as a manager of these callbacks.
+   */
+  void setFlushList(FlushList* flushList) {
+    base_->setFlushList(flushList);
+  }
 
  private:
   std::shared_ptr<AsyncMcClientImpl> base_;

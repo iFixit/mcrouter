@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -14,21 +14,24 @@
 #include <string>
 
 #include <folly/IntrusiveList.h>
+#include <folly/Range.h>
 #include <folly/SpinLock.h>
-#include <folly/io/async/AsyncTimeout.h>
 
 #include "mcrouter/ExponentialSmoothData.h"
 #include "mcrouter/TkoLog.h"
 #include "mcrouter/config.h"
-#include "mcrouter/lib/McOperation.h"
+#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/mc/msg.h"
-#include "mcrouter/lib/network/AccessPoint.h"
-#include "mcrouter/lib/network/AsyncMcClient.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+
+namespace folly {
+class AsyncTimeout;
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
 
+struct AccessPoint;
+class AsyncMcClient;
 struct ReplyStatsContext;
 
 namespace mcrouter {
@@ -62,7 +65,7 @@ class ProxyDestination {
     double retransPerKByte{0.0};
   };
 
-  ProxyBase* proxy{nullptr}; ///< for convenience
+  ProxyBase& proxy; // for convenience
 
   std::shared_ptr<TkoTracker> tracker;
 
@@ -101,10 +104,6 @@ class ProxyDestination {
 
   void updateShortestTimeout(std::chrono::milliseconds timeout);
 
-  void updatePoolName(std::string poolName) {
-    poolName_ = std::move(poolName);
-  }
-
   /**
    * Gracefully closes the connection, allowing it to properly drain if
    * possible.
@@ -112,18 +111,17 @@ class ProxyDestination {
   void closeGracefully();
 
  private:
-  static const uint64_t kDeadBeef = 0xdeadbeefdeadbeefULL;
-
   std::unique_ptr<AsyncMcClient> client_;
-  std::shared_ptr<const AccessPoint> accessPoint_;
-  mutable folly::SpinLock clientLock_; // AsyncMcClient lock for stats threads.
+  const std::shared_ptr<const AccessPoint> accessPoint_;
+  // Ensure proxy thread doesn't reset AsyncMcClient
+  // while config and stats threads may be accessing it
+  mutable folly::SpinLock clientLock_;
 
   // Shortest timeout among all DestinationRoutes using this destination
   std::chrono::milliseconds shortestTimeout_{0};
   const uint64_t qosClass_{0};
   const uint64_t qosPath_{0};
-  std::string routerInfoName_;
-  uint64_t magic_{0}; ///< to allow asserts that pdstn is still alive
+  const folly::StringPiece routerInfoName_;
 
   Stats stats_;
 
@@ -133,7 +131,6 @@ class ProxyDestination {
 
   int probe_delay_next_ms{0};
   bool probeInflight_{false};
-  std::string poolName_;
   // The string is stored in ProxyDestinationMap::destinations_
   folly::StringPiece pdstnKey_; ///< consists of ap, server_timeout
 
@@ -145,7 +142,7 @@ class ProxyDestination {
       std::chrono::milliseconds timeout,
       uint64_t qosClass,
       uint64_t qosPath,
-      std::string routerInfoName);
+      folly::StringPiece routerInfoName);
 
   void setState(State st);
 
@@ -171,11 +168,15 @@ class ProxyDestination {
       std::chrono::milliseconds timeout,
       uint64_t qosClass,
       uint64_t qosPath,
-      std::string routerInfoName);
+      folly::StringPiece routerInfoName);
 
   void onTkoEvent(TkoLogEvent event, mc_res_t result) const;
 
   void handleRxmittingConnection();
+
+  void onTransitionToState(State state);
+  void onTransitionFromState(State state);
+  void onTransitionImpl(State state, bool to);
 
   void* stateList_{nullptr};
   folly::IntrusiveListHook stateListHook_;
@@ -184,8 +185,9 @@ class ProxyDestination {
 
   friend class ProxyDestinationMap;
 };
-} // mcrouter
-} // memcache
-} // facebook
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ProxyDestination-inl.h"

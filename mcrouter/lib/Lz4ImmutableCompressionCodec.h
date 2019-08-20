@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -24,12 +24,12 @@ class Lz4ImmutableCompressionCodec : public CompressionCodec {
       uint32_t codecCompressionLevel);
 
   std::unique_ptr<folly::IOBuf> compress(const struct iovec* iov, size_t iovcnt)
-      override final;
+      final;
 
   std::unique_ptr<folly::IOBuf> uncompress(
       const struct iovec* iov,
       size_t iovcnt,
-      size_t uncompressedSize) override final;
+      size_t uncompressedSize) final;
 
  private:
   Lz4Immutable codec_;

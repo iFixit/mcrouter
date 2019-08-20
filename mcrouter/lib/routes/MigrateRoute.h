@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -29,14 +29,17 @@ namespace facebook {
 namespace memcache {
 
 /**
- * This route handle changes behavior based on Migration mode.
+ * This route handle changes behavior based on Migration mode. Each request is
+ * assigned a migration time based on the hash of its key in order to migrate
+ * smoothly over time. A key's migration time is calculated as start_time +
+ * hash(key) % (2 * interval).
  * 1. Before the migration starts, sends all requests to from_ route
  * handle.
- * 2. Between start time and (start_time + interval), sends all requests except
+ * 2. Between start time and the key's migration time, sends all requests except
  * for deletes to from_ route handle and sends all delete requests to both from_
  * and to_ route handle. For delete requests, returns reply from
  * worst among two replies.
- * 3. Between (start time + interval) and (start_time + 2*interval), sends all
+ * 3. Between the key's migration time and (start_time + 2*interval), sends all
  * requests except for deletes to to_ route handle and sends all delete requests
  * to both from_ and to_ route handle. For delete requests, returns
  * reply from worst among two replies.
@@ -53,7 +56,7 @@ class MigrateRoute {
   void traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    auto mask = routeMask(req);
+    auto mask = routeMask(tp_(), req);
     if (mask & kFromMask) {
       t(*from_, req);
     }
@@ -77,11 +80,40 @@ class MigrateRoute {
     assert(to_ != nullptr);
   }
 
+  McLeaseSetReply route(const McLeaseSetRequest& req) const {
+    const time_t now = tp_();
+    auto mask = routeMask(now, req);
+    switch (mask) {
+      case kFromMask:
+        return from_->route(req);
+      case kToMask:
+      default:
+        McLeaseSetReply reply = to_->route(req);
+        if (reply.result() != mc_res_stored &&
+            now < (migrationTime(req) + 10)) {
+          // Send a lease invalidation to from_ if the lease-set failed and we
+          // recently migrated to to_. This helps ensure that servers in the old
+          // pool don't accumulate unfulfilled lease tokens.
+          auto leaseInvalidation =
+              std::make_unique<McLeaseSetRequest>(req.key().fullKey());
+          leaseInvalidation->exptime() = -1;
+          leaseInvalidation->leaseToken() = req.leaseToken();
+          folly::fibers::addTask([
+            rh = from_,
+            leaseInvalidation = std::move(leaseInvalidation)
+          ]() { rh->route(*leaseInvalidation); });
+        }
+        return reply;
+    }
+  }
+
   template <class Request>
-  ReplyT<Request> route(const Request& req) const {
+  ReplyT<Request> route(
+      const Request& req,
+      carbon::OtherThanT<Request, McLeaseSetRequest> = 0) const {
     using Reply = ReplyT<Request>;
 
-    auto mask = routeMask(req);
+    auto mask = routeMask(tp_(), req);
 
     switch (mask) {
       case kFromMask:
@@ -117,14 +149,13 @@ class MigrateRoute {
   const TimeProvider tp_;
 
   template <class Request>
-  int routeMask(const Request&, carbon::DeleteLikeT<Request> = 0) const {
-    time_t curr = tp_();
-
-    if (curr < startTimeSec_) {
+  int routeMask(time_t now, const Request&, carbon::DeleteLikeT<Request> = 0)
+      const {
+    if (now < startTimeSec_) {
       return kFromMask;
     }
 
-    if (curr < (startTimeSec_ + 2 * intervalSec_)) {
+    if (now < (startTimeSec_ + 2 * intervalSec_)) {
       return kFromMask | kToMask;
     }
 
@@ -134,15 +165,21 @@ class MigrateRoute {
 
   template <class Request>
   int routeMask(
-      const Request&,
+      time_t now,
+      const Request& req,
       carbon::OtherThanT<Request, carbon::DeleteLike<>> = 0) const {
-    time_t curr = tp_();
-
-    if (curr < (startTimeSec_ + intervalSec_)) {
+    if (now < migrationTime(req)) {
       return kFromMask;
     } else {
       return kToMask;
     }
+  }
+
+  // Returns the timestamp when traffic switches between from_ and to_.
+  template <class Request>
+  time_t migrationTime(const Request& req) const {
+    return startTimeSec_ + intervalSec_ +
+        req.key().routingKeyHash() % intervalSec_;
   }
 };
 } // memcache

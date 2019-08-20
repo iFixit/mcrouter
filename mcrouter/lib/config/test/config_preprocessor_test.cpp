@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -37,7 +37,7 @@ const folly::StringKeyedUnorderedMap<folly::dynamic> kGlobalParams = {
     {"templGlobal", "templ"}};
 
 class MockImportResolver : public ImportResolverIf {
-  std::string import(folly::StringPiece path) override final {
+  std::string import(folly::StringPiece path) final {
     if (path == "test") {
       return "\"mock_test\"";
     }

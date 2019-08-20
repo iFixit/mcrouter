@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -85,9 +85,9 @@ struct ServerStat {
     folly::format(" pending_reqs:{}", pendingRequestsCount).appendTo(res);
     folly::format(" inflight_reqs:{}", inflightRequestsCount).appendTo(res);
     if (isHardTko) {
-      folly::format(" hard_tko; ").appendTo(res);
+      res.append(" hard_tko; ");
     } else if (isSoftTko) {
-      folly::format(" soft_tko; ").appendTo(res);
+      res.append(" soft_tko; ");
     }
     if (cntRetransPerKByte > 0) {
       double avgRetransPerKByte = sumRetransPerKByte / cntRetransPerKByte;

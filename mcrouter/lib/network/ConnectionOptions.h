@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -98,8 +98,10 @@ struct ConnectionOptions {
 
   /**
    * Name of the router that owns this connection.
+   * NOTE: Must be be a literal (constexpr), and shouldn't be used
+   * outside of mcrouter.
    */
-  std::string routerInfoName;
+  folly::StringPiece routerInfoName;
 
   /**
    * enable ssl session caching
@@ -116,6 +118,16 @@ struct ConnectionOptions {
    * If nullptr, compression will be disabled.
    */
   const CompressionCodecMap* compressionCodecMap{nullptr};
+
+  /**
+   * Service identity of the destination service when SSL is used.
+   */
+  std::string sslServiceIdentity;
+
+  /**
+   * Whether TFO is enabled for SSL connections
+   */
+  bool tfoEnabledForSsl{false};
 };
 }
 } // facebook::memcache

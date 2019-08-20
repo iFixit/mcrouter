@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -11,12 +11,19 @@
 #include <folly/fibers/FiberManager.h>
 
 #include "fbtrace/libfbtrace/c/fbtrace.h"
+#include "mcrouter/lib/carbon/RequestReplyUtil.h"
 #include "mcrouter/lib/fbi/cpp/LogFailure.h"
 #include "mcrouter/lib/mc/mc_fbtrace_info.h"
 #endif
 
+#include "mcrouter/lib/carbon/RequestCommon.h"
+
 namespace facebook {
 namespace memcache {
+
+// An opaque identifier. Pass it around after starting tracing with
+// traceRequestReceived().
+using CommIdType = std::string;
 
 #ifdef LIBMC_FBTRACE_DISABLE
 
@@ -29,6 +36,28 @@ bool fbTraceOnSend(const Request& request, const AccessPoint& ap) {
 inline void fbTraceOnReceive(
     const mc_fbtrace_info_s* fbtraceInfo,
     const mc_res_t result) {
+  // Do nothing by default.
+}
+
+inline bool traceCheckRateLimit() {
+  return false;
+}
+
+inline uint64_t traceGetCount() {
+  return 0;
+}
+
+inline mc_fbtrace_info_s* getFbTraceInfo(const carbon::RequestCommon&) {
+  return nullptr;
+}
+
+template <class Request>
+inline CommIdType traceRequestReceived(const Request& req) {
+  // Do nothing by default.
+  return CommIdType();
+}
+
+inline void traceRequestHandlerCompleted(const CommIdType& commId) {
   // Do nothing by default.
 }
 
@@ -154,6 +183,26 @@ inline void fbTraceOnReceive(
       VLOG(1) << "Error in fbtrace_reply_receive: " << fbtrace_error();
     }
   });
+}
+
+inline const mc_fbtrace_info_s* getFbTraceInfo(
+    const carbon::RequestCommon& request) {
+  return request.fbtraceInfo();
+}
+
+// Start tracing for a request.
+// NOTE: this function does not exist if LIBMC_FBTRACE_DISABLE is defined.
+CommIdType traceRequestReceived(
+    const mc_fbtrace_info_t& trace,
+    folly::StringPiece requestType);
+
+// Call this when the handler for a request has completed.
+void traceRequestHandlerCompleted(const CommIdType& commId);
+
+template <class Request>
+inline CommIdType traceRequestReceived(const Request& req) {
+  assert(getFbTraceInfo(req));
+  return traceRequestReceived(*getFbTraceInfo(req), Request::name);
 }
 
 #endif

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -35,6 +35,7 @@ static_assert(false, "mcrouter: invalid build");
 #define MCROUTER_STATS_ROOT_DEFAULT "/var/mcrouter/stats"
 #define DEBUG_FIFO_ROOT_DEFAULT "/var/mcrouter/fifos"
 #define CONFIG_DUMP_ROOT_DEFAULT "/var/mcrouter/config"
+#define MCROUTER_DEFAULT_CA_PATH ""
 
 namespace folly {
 struct dynamic;
@@ -59,9 +60,6 @@ inline LogPostprocessCallbackFunc getLogPostprocessFunc() {
 }
 
 namespace mcrouter {
-
-template <class RouteHandleIf>
-class ExtraRouteHandleProviderIf;
 
 class CarbonRouterInstanceBase;
 class ConfigApi;
@@ -110,6 +108,10 @@ inline time_t nowWallSec() {
   return time(nullptr);
 }
 
+bool readLibmcrouterFlavor(
+    folly::StringPiece flavor,
+    std::unordered_map<std::string, std::string>& options);
+
 bool read_standalone_flavor(
     const std::string& flavor,
     std::unordered_map<std::string, std::string>& option_dict,
@@ -119,12 +121,12 @@ std::unique_ptr<ConfigApi> createConfigApi(const McrouterOptions& opts);
 
 std::string performOptionSubstitution(std::string str);
 
+inline void standalonePreInitFromCommandLineOpts(
+    const std::unordered_map<std::string, std::string>& st_option_dict) {}
+
 inline void standaloneInit(
     const McrouterOptions& opts,
     const McrouterStandaloneOptions& standaloneOpts) {}
-
-std::unique_ptr<ExtraRouteHandleProviderIf<MemcacheRouterInfo>>
-createExtraRouteHandleProvider();
 
 std::unique_ptr<McrouterLogger> createMcrouterLogger(
     CarbonRouterInstanceBase& router);
@@ -163,6 +165,9 @@ void insertCustomStartupOpts(folly::dynamic& options);
 
 std::string getBinPath(folly::StringPiece name);
 
+std::string getDefaultPemCertPath();
+std::string getDefaultPemCertKey();
+
 #ifndef MCROUTER_PACKAGE_STRING
 #define MCROUTER_PACKAGE_STRING "1.0.0 mcrouter"
 #endif
@@ -173,6 +178,7 @@ startObservingRuntimeVarsFileCustom(
     std::function<void(std::string)> onUpdate) {
   return folly::none;
 }
-}
-}
-} // facebook::memcache::mcrouter
+
+} // mcrouter
+} // memcache
+} // facebook

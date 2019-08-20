@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -10,7 +10,7 @@
 #pragma once
 
 #include <folly/SpinLock.h>
-#include <folly/detail/CacheLocality.h>
+#include <folly/concurrency/CacheLocality.h>
 
 namespace facebook {
 namespace memcache {
@@ -67,7 +67,8 @@ class CacheClientStats {
   }
 
  private:
-  mutable folly::SpinLock lock_ FOLLY_ALIGN_TO_AVOID_FALSE_SHARING;
+  alignas(folly::hardware_destructive_interference_size) mutable folly::SpinLock
+      lock_;
   CacheClientCounters counters_;
 };
 }

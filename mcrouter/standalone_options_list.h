@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2015, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -132,6 +132,24 @@ MCROUTER_OPTION_INTEGER(
     no_short,
     "Timeout for sending replies back to clients, in milliseconds. "
     "(0 to disable)")
+
+MCROUTER_OPTION_INTEGER(
+    uint64_t,
+    server_load_interval_ms,
+    0,
+    "server-load-interval-ms",
+    no_short,
+    "How often to collect server load data. "
+    "(0 to disable exposing server load)")
+
+MCROUTER_OPTION_INTEGER(
+    uint32_t,
+    tfo_queue_size,
+    100000,
+    "tfo-queue-size",
+    no_short,
+    "TFO queue size for SSL connections.  "
+    "(only matters if ssl tfo is enabled)")
 
 #ifdef ADDITIONAL_STANDALONE_OPTIONS_FILE
 #include ADDITIONAL_STANDALONE_OPTIONS_FILE

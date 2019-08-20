@@ -1,4 +1,4 @@
-# Copyright (c) 2017, Facebook, Inc.
+# Copyright (c) 2017-present, Facebook, Inc.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
@@ -110,7 +110,7 @@ class ProcessBase(object):
             try:
                 with open(self.log, 'r') as log_f:
                     log = log_f.read()
-            except:
+            except IOError:
                 log = ""
         else:
             log = ""
@@ -123,23 +123,25 @@ class ProcessBase(object):
             print("{} ({}) stdout:\n{}".format(self, self.cmd_line, stderr))
 
 class MCProcess(ProcessBase):
-    """
-    It would be best to use mc.client and support all requests. But we can't do
-    that until mc.client supports ASCII (because mcproxy doesn't support
-    binary). For now, be hacky and just talk ASCII by hand.
-    """
-
     proc = None
 
-    def __init__(self, cmd, port, base_dir=None, junk_fill=False):
-        port = int(port)
+    def __init__(self, cmd, addr, base_dir=None, junk_fill=False):
+        if cmd is not None and '-s' in cmd:
+            if os.path.exists(addr):
+                raise Exception('file path already existed')
+            self.addr = addr
+            self.port = 0
+            self.addr_family = socket.AF_UNIX
+        else:
+            port = int(addr)
+            self.addr = ('localhost', port)
+            self.port = port
+            self.addr_family = socket.AF_INET
 
         if base_dir is None:
             base_dir = BaseDirectory('MCProcess')
 
         ProcessBase.__init__(self, cmd, base_dir, junk_fill)
-        self.addr = ('localhost', port)
-        self.port = port
         self.deletes = 0
         self.others = 0
 
@@ -147,7 +149,7 @@ class MCProcess(ProcessBase):
         return self.port
 
     def connect(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = socket.socket(self.addr_family, socket.SOCK_STREAM)
         self.socket.connect(self.addr)
         self.fd = self.socket.makefile()
 
@@ -318,12 +320,12 @@ class MCProcess(ProcessBase):
             return None
         return re.match("STORED", answer)
 
-    def leaseSet(self, key, value_token, is_stalestored=False):
+    def leaseSet(self, key, value_token, exptime=0, is_stalestored=False):
         value = str(value_token["value"])
         token = int(value_token["token"])
         flags = 0
-        cmd = "lease-set %s %d %d 0 %d\r\n%s\r\n" % \
-                (key, token, flags, len(value), value)
+        cmd = "lease-set %s %d %d %d %d\r\n%s\r\n" % \
+                (key, token, flags, exptime, len(value), value)
         self.socket.sendall(cmd)
 
         answer = self.fd.readline().strip()
@@ -750,12 +752,20 @@ class Memcached(MCProcess):
             if listen_sock is not None:
                 listen_sock.close()
         else:
+            args.extend([
+                '-A',
+                '-g',
+                '-t', '1',
+                '--enable-hash-alias',
+                '--enable-unchecked-l1-sentinel-reads',
+                '--use-asmcs',
+            ])
             if port is None:
                 listen_sock = create_listen_socket()
                 port = listen_sock.getsockname()[1]
-                args.extend(['--listen_sock', str(listen_sock.fileno())])
+                args.extend(['--listen-sock-fd', str(listen_sock.fileno())])
             else:
-                args.extend(['--port', str(port)])
+                args.extend(['-p', str(port)])
 
             MCProcess.__init__(self, args, port)
 

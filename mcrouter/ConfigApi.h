@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -103,7 +103,7 @@ class ConfigApi : public ConfigApiIf {
    */
   virtual void stopObserving(pid_t pid) noexcept;
 
-  virtual ~ConfigApi();
+  ~ConfigApi() override;
 
   /**
    * Enable a behavior that forces this class to read config from

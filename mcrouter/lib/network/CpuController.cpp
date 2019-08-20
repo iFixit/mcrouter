@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,6 +9,8 @@
  */
 #include "CpuController.h"
 
+#include <cassert>
+
 #include <folly/File.h>
 #include <folly/FileUtil.h>
 
@@ -16,9 +18,6 @@ namespace facebook {
 namespace memcache {
 
 namespace {
-
-// The interval of reading /proc/stat and /proc/meminfo in milliseconds
-constexpr double kReadProcInterval = 10;
 
 bool readProcStat(std::vector<uint64_t>& curArray) {
   auto cpuStatFile = folly::File("/proc/stat");
@@ -31,11 +30,15 @@ bool readProcStat(std::vector<uint64_t>& curArray) {
 
   if (sscanf(
           buf.data(),
-          "cpu %lu %lu %lu %lu",
+          "cpu %lu %lu %lu %lu %lu %lu %lu %lu",
           &curArray[0],
           &curArray[1],
           &curArray[2],
-          &curArray[3]) != static_cast<int>(curArray.size())) {
+          &curArray[3],
+          &curArray[4],
+          &curArray[5],
+          &curArray[6],
+          &curArray[7]) != static_cast<int>(curArray.size())) {
     return false;
   }
 
@@ -45,16 +48,17 @@ bool readProcStat(std::vector<uint64_t>& curArray) {
 } // anonymous
 
 CpuController::CpuController(
-    uint64_t target,
+    const CongestionControllerOptions& opts,
     folly::EventBase& evb,
-    std::chrono::milliseconds delay,
     size_t queueCapacity)
     : evb_(evb),
-      logic_(std::make_shared<CongestionController>(
-          target,
-          delay,
-          evb,
-          queueCapacity)) {}
+      logic_(std::make_shared<CongestionController>(opts, evb, queueCapacity)),
+      dataCollectionInterval_(opts.dataCollectionInterval),
+      enableDropProbability_(
+          opts.target > 0 && opts.delay >= opts.dataCollectionInterval),
+      enableServerLoad_(opts.enableServerLoad) {
+  assert(opts.shouldEnable());
+}
 
 double CpuController::getDropProbability() const {
   return logic_->getDropProbability();
@@ -77,27 +81,30 @@ void CpuController::cpuLoggingFn() {
   double cpuUtil = 0.0;
 
   // Corner case: When parsing /proc/stat fails, set the cpuUtil to 0.
-  std::vector<uint64_t> cur(4);
+  std::vector<uint64_t> cur(8);
   if (readProcStat(cur)) {
     if (firstLoop_) {
       prev_ = std::move(cur);
       firstLoop_ = false;
     } else {
       /**
-      * The values in the /proc/stat is the CPU time since boot.
-      * 1st column is user, 2nd column is nice, 3rd column is system, and
-      * the 4th column is idle. The total CPU time in the last window is
-      * delta busy time over delta total time.
-      */
-      auto curUtil = cur[0] + cur[1] + cur[2];
-      auto prevUtil = prev_[0] + prev_[1] + prev_[2];
+       * The values in the /proc/stat is the CPU time since boot.
+       * Columns [0, 1, ... 9] map to [user, nice, system, idle, iowait, irq,
+       * softirq, steal, guest, guest_nice]. Guest related fields are not used
+       * for the cpu util calculation. The total CPU time in the last
+       * window is delta busy time over delta total time.
+       */
+      auto curUtil =
+          cur[0] + cur[1] + cur[2] + cur[4] + cur[5] + cur[6] + cur[7];
+      auto prevUtil = prev_[0] + prev_[1] + prev_[2] + prev_[4] + prev_[5] +
+          prev_[6] + prev_[7];
       auto utilDiff = static_cast<double>(curUtil - prevUtil);
       auto totalDiff = utilDiff + cur[3] - prev_[3];
 
       /**
-      * Corner case: If CPU didn't change or the proc/stat didn't get
-      * updated or ticks didn't increase, set the cpuUtil to 0.
-      */
+       * Corner case: If CPU didn't change or the proc/stat didn't get
+       * updated or ticks didn't increase, set the cpuUtil to 0.
+       */
       if (totalDiff < 0.001 || curUtil < prevUtil) {
         cpuUtil = 0.0;
       } else {
@@ -108,12 +115,22 @@ void CpuController::cpuLoggingFn() {
     }
   }
   if (stopController_) {
-    logic_->updateValue(0.0);
+    update(0.0);
     return;
   }
-  logic_->updateValue(cpuUtil);
+  update(cpuUtil);
   auto self = shared_from_this();
-  evb_.runAfterDelay([this, self]() { cpuLoggingFn(); }, kReadProcInterval);
+  evb_.runAfterDelay(
+      [this, self]() { cpuLoggingFn(); }, dataCollectionInterval_.count());
+}
+
+void CpuController::update(double cpuUtil) {
+  if (enableDropProbability_) {
+    logic_->updateValue(cpuUtil);
+  }
+  if (enableServerLoad_) {
+    percentLoad_.store(cpuUtil);
+  }
 }
 
 } // memcache

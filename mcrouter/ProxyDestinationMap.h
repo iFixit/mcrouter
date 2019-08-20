@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <folly/Range.h>
 #include <folly/experimental/StringKeyedUnorderedMap.h>
 #include <folly/io/async/AsyncTimeout.h>
 
@@ -63,7 +64,7 @@ class ProxyDestinationMap {
       std::chrono::milliseconds timeout,
       uint64_t qosClass,
       uint64_t qosPath,
-      std::string routerInfoName);
+      folly::StringPiece routerInfoName);
 
   /**
    * Remove destination from both active and inactive lists
@@ -140,6 +141,6 @@ class ProxyDestinationMap {
    */
   void scheduleTimer(bool initialAttempt);
 };
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

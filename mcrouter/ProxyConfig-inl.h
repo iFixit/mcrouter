@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -101,9 +101,8 @@ ProxyConfig<RouterInfo>::ProxyConfig(
   asyncLogRoutes_ = provider.releaseAsyncLogRoutes();
   pools_ = provider.releasePools();
   accessPoints_ = provider.releaseAccessPoints();
-  proxyRoute_ =
-      std::make_shared<ProxyRoute<RouterInfo>>(&proxy, routeSelectors);
-  serviceInfo_ = std::make_shared<ServiceInfo<RouterInfo>>(&proxy, *this);
+  proxyRoute_ = std::make_shared<ProxyRoute<RouterInfo>>(proxy, routeSelectors);
+  serviceInfo_ = std::make_shared<ServiceInfo<RouterInfo>>(proxy, *this);
 }
 
 template <class RouterInfo>
@@ -121,6 +120,6 @@ size_t ProxyConfig<RouterInfo>::calcNumClients() const {
   }
   return result;
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -81,12 +81,12 @@ AccessPoint::AccessPoint(
     mc_protocol_t protocol,
     bool useSsl,
     bool compressed,
-    std::string hostname)
+    bool unixDomainSocket)
     : port_(port),
       protocol_(protocol),
       useSsl_(useSsl),
       compressed_(compressed),
-      hostname_(hostname) {
+      unixDomainSocket_(unixDomainSocket) {
   try {
     folly::IPAddress ip(host);
     host_ = ip.toFullyQualified();
@@ -103,13 +103,13 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
     mc_protocol_t defaultProtocol,
     bool defaultUseSsl,
     uint16_t portOverride,
-    bool defaultCompressed,
-    std::string hostname) {
+    bool defaultCompressed) {
   if (apString.empty()) {
     return nullptr;
   }
 
   folly::StringPiece host;
+  bool unixDomainSocket = false;
   if (apString[0] == '[') {
     // IPv6
     auto closing = apString.find(']');
@@ -119,7 +119,11 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
     host = apString.subpiece(1, closing - 1);
     apString.advance(closing + 1);
   } else {
-    // IPv4 or hostname
+    // IPv4 or hostname or UNIX domain socket
+    if (apString.subpiece(0, 5) == "unix:") { // Unix domain socket
+      unixDomainSocket = true;
+      apString.advance(5);
+    }
     auto colon = apString.find(':');
     if (colon == std::string::npos) {
       host = apString;
@@ -136,7 +140,16 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
 
   try {
     folly::StringPiece port, protocol, encr, comp;
-    parseParts(apString, port, protocol, encr, comp);
+    if (unixDomainSocket) {
+      port = "0";
+      parseParts(apString, protocol, encr, comp);
+      // Unix Domain Sockets with SSL is not supported.
+      if (!encr.empty() && parseSsl(encr)) {
+        return nullptr;
+      }
+    } else {
+      parseParts(apString, port, protocol, encr, comp);
+    }
 
     return std::make_shared<AccessPoint>(
         host,
@@ -144,7 +157,7 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
         protocol.empty() ? defaultProtocol : parseProtocol(protocol),
         encr.empty() ? defaultUseSsl : parseSsl(encr),
         comp.empty() ? defaultCompressed : parseCompressed(comp),
-        hostname);
+        unixDomainSocket);
   } catch (const std::exception&) {
     return nullptr;
   }
@@ -187,5 +200,6 @@ std::string AccessPoint::toString() const {
       ":",
       compressed_ ? "compressed" : "notcompressed");
 }
-}
-} // facebook::memcache
+
+} // memcache
+} // facebook

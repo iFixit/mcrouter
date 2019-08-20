@@ -195,9 +195,9 @@ class SimpleUnion {
   void foreachMember(V&& v) const;
 
  private:
-  uint32_t _which_{0};
-
   carbon::Variant<int64_t, bool, std::string> _carbon_variant;
+
+  uint32_t _which_{0};
 };
 
 class YetAnotherReply;
@@ -289,8 +289,8 @@ class YetAnotherReply : public carbon::ReplyCommon {
   carbon::Result result_{mc_res_unknown};
 };
 
-} // util
-} // test2
-} // carbon
+} // namespace util
+} // namespace test2
+} // namespace carbon
 
 #include "BMessages-inl.h"

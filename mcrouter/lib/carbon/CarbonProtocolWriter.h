@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -15,6 +15,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <folly/small_vector.h>
 
@@ -255,6 +256,20 @@ class CarbonProtocolWriter {
     writeRaw(container);
   }
 
+  template <class T>
+  void writeField(const int16_t id, const folly::Optional<T>& data) {
+    if (data.hasValue()) {
+      writeFieldHeader(detail::TypeToField<T>::fieldType, id);
+      writeRaw(*data);
+    }
+  }
+
+  void writeField(const int16_t id, const folly::Optional<bool>& data) {
+    if (data.hasValue()) {
+      writeFieldAlways(id, *data);
+    }
+  }
+
   // Serialize user-provided types that have suitable specializations of
   // carbon::SerializationTraits<>.
   template <class T>
@@ -268,6 +283,10 @@ class CarbonProtocolWriter {
   template <class T>
   typename std::enable_if<detail::IsUserReadWriteDefined<T>::value, void>::type
   writeFieldAlways(const int16_t id, const T& data) {
+    static_assert(
+        (SerializationTraits<T>::kWireType != FieldType::True) &&
+            (SerializationTraits<T>::kWireType != FieldType::False),
+        "Usertypes cannot have a boolean wiretype.");
     writeFieldHeader(SerializationTraits<T>::kWireType, id);
     SerializationTraits<T>::write(data, *this);
   }
@@ -335,6 +354,11 @@ class CarbonProtocolWriter {
       writeTwoBytes(static_cast<uint16_t>(id));
     }
     lastFieldId_ = id;
+  }
+
+  template <class T>
+  void writeRaw(const folly::Optional<T>& data) {
+    SerializationTraits<folly::Optional<T>>::write(data, *this);
   }
 
   void writeRaw(const std::string& s) {
@@ -476,8 +500,6 @@ class CarbonProtocolWriter {
       appender_.write(byte);
       val >>= 7;
     }
-    facebook::memcache::checkRuntime(
-        val < 0x80, "writeVarint() called on invalid varint");
     appender_.write(static_cast<uint8_t>(val));
   }
 

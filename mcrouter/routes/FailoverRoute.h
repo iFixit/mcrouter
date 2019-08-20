@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -38,12 +38,30 @@ class RouteHandleFactory;
 
 namespace mcrouter {
 
+namespace detail {
+
+// Append number of destinations to the name of the route handle.
+// That's useful for us to just failover LeaseSets when then number of
+// failover targets didn't change.
+inline std::string getFailoverRouteName(std::string name, size_t numTargets) {
+  if (name.empty()) {
+    return "";
+  }
+  return folly::to<std::string>(
+      std::move(name), ":failover_targets=", numTargets);
+}
+
+} // namespace detail
+
 /**
  * Sends the same request sequentially to each destination in the list in order,
  * until the first non-error reply.  If all replies result in errors, returns
  * the last destination's reply.
  */
-template <class RouterInfo, typename FailoverPolicyT>
+template <
+    class RouterInfo,
+    typename FailoverPolicyT,
+    typename FailoverErrorsSettingsT = FailoverErrorsSettings>
 class FailoverRoute {
  private:
   using RouteHandleIf = typename RouterInfo::RouteHandleIf;
@@ -69,20 +87,20 @@ class FailoverRoute {
 
   FailoverRoute(
       std::vector<std::shared_ptr<RouteHandleIf>> targets,
-      FailoverErrorsSettings failoverErrors,
+      FailoverErrorsSettingsT failoverErrors,
       std::unique_ptr<FailoverRateLimiter> rateLimiter,
       bool failoverTagging,
       bool enableLeasePairing,
       std::string name,
       const folly::dynamic& policyConfig)
-      : name_(std::move(name)),
+      : name_(detail::getFailoverRouteName(std::move(name), targets.size())),
         targets_(std::move(targets)),
         failoverErrors_(std::move(failoverErrors)),
         rateLimiter_(std::move(rateLimiter)),
         failoverTagging_(failoverTagging),
         failoverPolicy_(targets_, policyConfig),
         enableLeasePairing_(enableLeasePairing) {
-    assert(targets_.size() > 1);
+    assert(!targets_.empty());
     assert(!enableLeasePairing_ || !name_.empty());
   }
 
@@ -105,7 +123,11 @@ class FailoverRoute {
       auto mutReq = req;
       mutReq.leaseToken() = item->originalToken;
       proxy.stats().increment(redirected_lease_set_count_stat);
-      assert(targets_.size() > item->routeHandleChildIndex);
+      if (targets_.size() <= item->routeHandleChildIndex) {
+        McLeaseSetReply errorReply(mc_res_local_error);
+        errorReply.message() = "LeaseSet failover destination out-of-range.";
+        return errorReply;
+      }
       return targets_[item->routeHandleChildIndex]->route(mutReq);
     }
 
@@ -142,22 +164,10 @@ class FailoverRoute {
  protected:
   const std::string name_;
 
-  virtual bool additionalFailoverCheck(
-      mc_res_t /* unused */,
-      folly::StringPiece /* unused */,
-      const folly::IOBuf& /* unused */) const {
-    return false;
-  }
-
  private:
-  enum class FailoverType {
-    NONE,
-    NORMAL,
-    CONDITIONAL,
-  };
 
   const std::vector<std::shared_ptr<RouteHandleIf>> targets_;
-  const FailoverErrorsSettings failoverErrors_;
+  const FailoverErrorsSettingsT failoverErrors_;
   std::unique_ptr<FailoverRateLimiter> rateLimiter_;
   const bool failoverTagging_{false};
   FailoverPolicyT failoverPolicy_;
@@ -180,7 +190,16 @@ class FailoverRoute {
       }
     };
 
-    auto normalReply = targets_[0]->route(req);
+    auto iter = failoverPolicy_.begin();
+    auto normalReply = iter->route(req);
+    ++iter;
+    if (iter == failoverPolicy_.end()) {
+      if (isErrorResult(normalReply.result())) {
+        proxy.stats().increment(failover_all_failed_stat);
+        proxy.stats().increment(failoverPolicy_.getFailoverFailedStat());
+      }
+      return normalReply;
+    }
     childIndex = 0;
     if (rateLimiter_) {
       rateLimiter_->bumpTotalReqs();
@@ -189,9 +208,9 @@ class FailoverRoute {
       return normalReply;
     }
     switch (shouldFailover(normalReply, req)) {
-      case FailoverType::NONE:
+      case FailoverErrorsSettingsBase::FailoverType::NONE:
         return normalReply;
-      case FailoverType::CONDITIONAL:
+      case FailoverErrorsSettingsBase::FailoverType::CONDITIONAL:
         conditionalFailover = true;
         break;
       default:
@@ -199,6 +218,7 @@ class FailoverRoute {
     }
 
     proxy.stats().increment(failover_all_stat);
+    proxy.stats().increment(failoverPolicy_.getFailoverStat());
 
     if (rateLimiter_ && !rateLimiter_->failoverAllowed()) {
       proxy.stats().increment(failover_rate_limited_stat);
@@ -208,6 +228,7 @@ class FailoverRoute {
     // Failover
     return fiber_local<RouterInfo>::runWithLocals(
         [this,
+         iter,
          &req,
          &proxy,
          &normalReply,
@@ -228,7 +249,7 @@ class FailoverRoute {
             return failoverReply;
           };
 
-          auto cur = failoverPolicy_.begin();
+          auto cur = iter;
           // set the index of the child that generated the reply.
           SCOPE_EXIT {
             childIndex = cur.getTrueIndex();
@@ -237,9 +258,9 @@ class FailoverRoute {
           for (++nx; nx != failoverPolicy_.end(); ++cur, ++nx) {
             auto failoverReply = doFailover(cur);
             switch (shouldFailover(failoverReply, req)) {
-              case FailoverType::NONE:
+              case FailoverErrorsSettingsBase::FailoverType::NONE:
                 return failoverReply;
-              case FailoverType::CONDITIONAL:
+              case FailoverErrorsSettingsBase::FailoverType::CONDITIONAL:
                 conditionalFailover = true;
                 break;
               default:
@@ -250,30 +271,18 @@ class FailoverRoute {
           auto failoverReply = doFailover(cur);
           if (isErrorResult(failoverReply.result())) {
             proxy.stats().increment(failover_all_failed_stat);
+            proxy.stats().increment(failoverPolicy_.getFailoverFailedStat());
           }
 
           return failoverReply;
         });
   }
 
-  // TODO t15812771 update this to work with all UpdateLike requests
-  FailoverType shouldFailover(const McSetReply& reply, const McSetRequest& req)
-      const {
-    if (failoverErrors_.shouldFailover(reply, req)) {
-      return FailoverType::NORMAL;
-    }
-    if (additionalFailoverCheck(
-            reply.result(), req.key().fullKey(), req.value())) {
-      return FailoverType::CONDITIONAL;
-    }
-    return FailoverType::NONE;
-  }
-
   template <class Request>
-  FailoverType shouldFailover(const ReplyT<Request>& reply, const Request& req)
-      const {
-    return failoverErrors_.shouldFailover(reply, req) ? FailoverType::NORMAL
-                                                      : FailoverType::NONE;
+  FailoverErrorsSettingsBase::FailoverType shouldFailover(
+      const ReplyT<Request>& reply,
+      const Request& req) const {
+    return failoverErrors_.shouldFailover(reply, req);
   }
 };
 

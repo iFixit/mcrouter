@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -244,18 +244,24 @@ static inline const char* mc_res_to_string(const mc_res_t result) {
   return "mc_res_unknown";
 }
 
+/* Flags are up to 48 bits in memcached server.
+ * <= 32bits uses 32bits of storage, else 16 bits stored elsewhere.
+ */
 enum mc_msg_flags_t {
   MC_MSG_FLAG_PHP_SERIALIZED = 0x1,
   MC_MSG_FLAG_COMPRESSED = 0x2,
   MC_MSG_FLAG_FB_SERIALIZED = 0x4,
   MC_MSG_FLAG_FB_COMPACT_SERIALIZED = 0x8,
   MC_MSG_FLAG_ASCII_INT_SERIALIZED = 0x10,
+  MC_MSG_FLAG_SIZE_SPLIT = 0x20,
   MC_MSG_FLAG_NZLIB_COMPRESSED = 0x800,
   MC_MSG_FLAG_QUICKLZ_COMPRESSED = 0x2000,
   MC_MSG_FLAG_SNAPPY_COMPRESSED = 0x4000,
-  MC_MSG_FLAG_BIG_VALUE = 0X8000,
+  MC_MSG_FLAG_BIG_VALUE = 0x8000,
   MC_MSG_FLAG_NEGATIVE_CACHE = 0x10000,
   MC_MSG_FLAG_HOT_KEY = 0x20000,
+  MC_MSG_FLAG_ZSTD_COMPRESSED = 0x40000,
+  MC_MSG_FLAG_MANAGED_COMPRESSION_COMPRESSED = 0x80000,
   /* Bits reserved for application-specific extension flags: */
   MC_MSG_FLAG_USER_1 = 0x100000000LL,
   MC_MSG_FLAG_USER_2 = 0x200000000LL,
@@ -287,6 +293,8 @@ static inline const char* mc_flag_to_string(const enum mc_msg_flags_t flag) {
       return "FB_COMPACT_SERIALIZED";
     case MC_MSG_FLAG_ASCII_INT_SERIALIZED:
       return "ASCII_INT_SERIALIZED";
+    case MC_MSG_FLAG_SIZE_SPLIT:
+      return "SIZE_SPLIT";
     case MC_MSG_FLAG_NZLIB_COMPRESSED:
       return "NZLIB_COMPRESSED";
     case MC_MSG_FLAG_QUICKLZ_COMPRESSED:
@@ -297,6 +305,10 @@ static inline const char* mc_flag_to_string(const enum mc_msg_flags_t flag) {
       return "BIG_VALUE";
     case MC_MSG_FLAG_NEGATIVE_CACHE:
       return "NEGATIVE_CACHE";
+    case MC_MSG_FLAG_ZSTD_COMPRESSED:
+      return "ZSTD_COMPRESSED";
+    case MC_MSG_FLAG_MANAGED_COMPRESSION_COMPRESSED:
+      return "MANAGED_COMPRESSION_COMPRESSED";
     case MC_MSG_FLAG_HOT_KEY:
       return "HOT_KEY";
     case MC_MSG_FLAG_USER_1:

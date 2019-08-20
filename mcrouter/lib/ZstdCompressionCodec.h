@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -11,7 +11,7 @@
 
 #include <folly/Format.h>
 
-#if FOLLY_HAVE_LIBZSTD
+#if FOLLY_HAVE_LIBZSTD && !defined(DISABLE_COMPRESSION)
 #include <zstd.h>
 
 #include "mcrouter/lib/Compression.h"
@@ -30,11 +30,11 @@ class ZstdCompressionCodec : public CompressionCodec {
       uint32_t codecCompressionLevel);
 
   std::unique_ptr<folly::IOBuf> compress(const struct iovec* iov, size_t iovcnt)
-      override final;
+      final;
   std::unique_ptr<folly::IOBuf> uncompress(
       const struct iovec* iov,
       size_t iovcnt,
-      size_t uncompressedLength = 0) override final;
+      size_t uncompressedLength = 0) final;
 
  private:
   template <class T>
@@ -51,4 +51,4 @@ class ZstdCompressionCodec : public CompressionCodec {
 
 } // memcache
 } // facebook
-#endif // FOLLY_HAVE_LIBZSTD
+#endif // FOLLY_HAVE_LIBZSTD && !defined(DISABLE_COMPRESSION)

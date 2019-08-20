@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -18,6 +18,7 @@
 #include "mcrouter/lib/carbon/RequestReplyUtil.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/network/CarbonMessageList.h"
+#include "mcrouter/lib/network/ServerLoad.h"
 #include "mcrouter/lib/network/UmbrellaProtocol.h"
 
 namespace facebook {
@@ -59,6 +60,8 @@ class McServerRequestContext {
   McServerSession& session();
 
   double getDropProbability() const;
+
+  ServerLoad getServerLoad() const noexcept;
 
  private:
   McServerSession* session_;
@@ -192,7 +195,7 @@ class McServerOnRequestIf<List<Request, Requests...>>
                << Request::name;
   }
 
-  virtual ~McServerOnRequestIf() = default;
+  ~McServerOnRequestIf() override = default;
 };
 
 class McServerOnRequest : public McServerOnRequestIf<McRequestList> {
@@ -232,7 +235,7 @@ class McServerOnRequestWrapper<OnRequest, List<>> : public McServerOnRequest {
   void caretRequestReady(
       const UmbrellaMessageInfo& headerInfo,
       const folly::IOBuf& reqBody,
-      McServerRequestContext&& ctx) override final;
+      McServerRequestContext&& ctx) final;
 
   void dispatchTypedRequestIfDefined(
       const UmbrellaMessageInfo& headerInfo,
@@ -282,15 +285,15 @@ class McServerOnRequestWrapper<OnRequest, List<Request, Requests...>>
       : McServerOnRequestWrapper<OnRequest, List<Requests...>>(
             std::forward<Args>(args)...) {}
 
-  void requestReady(McServerRequestContext&& ctx, Request&& req)
-      override final {
+  void requestReady(McServerRequestContext&& ctx, Request&& req) final {
     this->requestReadyImpl(
         std::move(ctx),
         std::move(req),
         carbon::detail::CanHandleRequest::value<Request, OnRequest>());
   }
 };
-}
-} // facebook::memcache
+
+} // memcache
+} // facebook
 
 #include "McServerRequestContext-inl.h"

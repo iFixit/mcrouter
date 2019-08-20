@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <iostream>
 
 #include <folly/io/async/EventBase.h>
@@ -56,9 +57,10 @@ class McPiper {
   }
 
  private:
+  folly::EventBase eventBase_;
   std::unique_ptr<MessagePrinter> messagePrinter_;
   std::unique_ptr<FifoReaderManager> fifoReaderManager_;
-  bool running_{false};
+  std::atomic<bool> running_{false};
 };
 
 } // mcpiper

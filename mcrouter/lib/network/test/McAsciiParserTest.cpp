@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -79,7 +79,7 @@ class McAsciiParserHarness {
     ReplyInfo(Reply reply, bool failure)
         : ReplyInfoWithReply<Reply>(std::move(reply), failure) {}
 
-    void initializeParser(ParserT& parser) const override final {
+    void initializeParser(ParserT& parser) const final {
       parser.expectNext<Request>();
     }
   };

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,8 +9,8 @@
  */
 #include "Lz4Immutable.h"
 
-#include <folly/Bits.h>
 #include <folly/Format.h>
+#include <folly/lang/Bits.h>
 
 #include "mcrouter/lib/IovecCursor.h"
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -14,6 +14,7 @@
 
 #include <folly/fibers/Baton.h>
 #include <folly/io/IOBufQueue.h>
+#include <folly/io/async/AsyncSocket.h>
 #include <folly/io/async/AsyncTransport.h>
 #include <folly/io/async/DelayedDestruction.h>
 #include <folly/io/async/VirtualEventBase.h>
@@ -48,6 +49,10 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
     SERVER_GONE_AWAY,
   };
 
+  using FlushList = boost::intrusive::list<
+      folly::EventBase::LoopCallback,
+      boost::intrusive::constant_time_size<false>>;
+
   static std::shared_ptr<AsyncMcClientImpl> create(
       folly::VirtualEventBase& eventBase,
       ConnectionOptions options);
@@ -59,7 +64,7 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
   void closeNow();
 
   void setStatusCallbacks(
-      std::function<void()> onUp,
+      std::function<void(const folly::AsyncSocket&)> onUp,
       std::function<void(ConnectionDownReason)> onDown);
 
   void setRequestStatusCallbacks(
@@ -91,6 +96,10 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
   template <class Request>
   double getDropProbability() const;
 
+  void setFlushList(FlushList* flushList) {
+    flushList_ = flushList;
+  }
+
  private:
   using ParserT = ClientMcParser<AsyncMcClientImpl>;
   friend ParserT;
@@ -103,17 +112,13 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
   };
 
   struct ConnectionStatusCallbacks {
-    std::function<void()> onUp;
+    std::function<void(const folly::AsyncSocket&)> onUp;
     std::function<void(ConnectionDownReason)> onDown;
   };
   struct RequestStatusCallbacks {
     std::function<void(int pendingDiff, int inflightDiff)> onStateChange;
     std::function<void(size_t numToSend)> onWrite;
   };
-
-  // We need to be able to get shared_ptr to ourself and shared_from_this()
-  // doesn't work correctly with DelayedDestruction.
-  std::weak_ptr<AsyncMcClientImpl> selfPtr_;
 
   folly::EventBase& eventBase_;
   std::unique_ptr<ParserT> parser_;
@@ -123,7 +128,6 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
 
   // Socket related variables.
   ConnectionState connectionState_{ConnectionState::DOWN};
-  ConnectionOptions connectionOptions_;
   folly::AsyncSocket::UniquePtr socket_;
   ConnectionStatusCallbacks statusCallbacks_;
   RequestStatusCallbacks requestStatusCallbacks_;
@@ -133,34 +137,50 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
 
   CodecIdRange supportedCompressionCodecs_ = CodecIdRange::Empty;
 
-  bool outOfOrder_{false};
-  bool pendingGoAwayReply_{false};
   McClientRequestContextQueue queue_;
 
   // Id for the next message that will be used by the next sendMsg() call.
   uint32_t nextMsgId_{1};
 
+  bool outOfOrder_{false};
+  bool pendingGoAwayReply_{false};
+
   // Throttle options (disabled by default).
   size_t maxPending_{0};
   size_t maxInflight_{0};
+
+  // Writer loop related variables.
+  class WriterLoop : public folly::EventBase::LoopCallback {
+   public:
+    explicit WriterLoop(AsyncMcClientImpl& client) : client_(client) {}
+    ~WriterLoop() override {}
+    void runLoopCallback() noexcept final;
+
+   private:
+    bool rescheduled_{false};
+    AsyncMcClientImpl& client_;
+  } writer_;
+  FlushList* flushList_{nullptr};
 
   // Retransmission values
   uint32_t lastRetrans_{0}; // last known value of the no. of retransmissions
   uint64_t lastKBytes_{0}; // last known number of kBs sent
 
-  // Writer loop related variables.
-  class WriterLoop;
-  bool writeScheduled_{false};
-  std::unique_ptr<WriterLoop> writer_;
-
   bool isAborting_{false};
+
+  ConnectionOptions connectionOptions_;
+
   std::unique_ptr<folly::EventBase::LoopCallback> eventBaseDestructionCallback_;
+
+  // We need to be able to get shared_ptr to ourself and shared_from_this()
+  // doesn't work correctly with DelayedDestruction.
+  std::weak_ptr<AsyncMcClientImpl> selfPtr_;
 
   AsyncMcClientImpl(
       folly::VirtualEventBase& eventBase,
       ConnectionOptions options);
 
-  ~AsyncMcClientImpl();
+  ~AsyncMcClientImpl() override;
 
   // Common part for send/sendSync.
   void sendCommon(McClientRequestContextBase& req);
@@ -182,25 +202,24 @@ class AsyncMcClientImpl : public folly::DelayedDestruction,
   folly::StringPiece clientStateToStr() const;
 
   // TAsyncSocket::ConnectCallback overrides
-  void connectSuccess() noexcept override final;
-  void connectErr(
-      const folly::AsyncSocketException& ex) noexcept override final;
+  void connectSuccess() noexcept final;
+  void connectErr(const folly::AsyncSocketException& ex) noexcept final;
 
   // We've have encountered some error or we're shutting down the client.
   // It goes to DOWN state.
   void processShutdown(folly::StringPiece errorMessage);
 
   // AsyncTransportWrapper::ReadCallback overrides
-  void getReadBuffer(void** bufReturn, size_t* lenReturn) override final;
-  void readDataAvailable(size_t len) noexcept override final;
-  void readEOF() noexcept override final;
-  void readErr(const folly::AsyncSocketException& ex) noexcept override final;
+  void getReadBuffer(void** bufReturn, size_t* lenReturn) final;
+  void readDataAvailable(size_t len) noexcept final;
+  void readEOF() noexcept final;
+  void readErr(const folly::AsyncSocketException& ex) noexcept final;
 
   // AsyncTransportWrapper::WriteCallback overrides
-  void writeSuccess() noexcept override final;
+  void writeSuccess() noexcept final;
   void writeErr(
       size_t bytesWritten,
-      const folly::AsyncSocketException& ex) noexcept override final;
+      const folly::AsyncSocketException& ex) noexcept final;
 
   // Callbacks for McParser.
   template <class Reply>

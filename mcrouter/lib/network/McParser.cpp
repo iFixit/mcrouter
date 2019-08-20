@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,13 +13,13 @@
 #include <new>
 #include <utility>
 
-#include <folly/Bits.h>
 #include <folly/Format.h>
 #include <folly/ThreadLocal.h>
 #include <folly/experimental/JemallocNodumpAllocator.h>
 #include <folly/io/Cursor.h>
+#include <folly/lang/Bits.h>
 
-#include "mcrouter/lib/cycles/Clocks.h"
+#include "mcrouter/lib/Clocks.h"
 #include "mcrouter/lib/network/UmbrellaProtocol.h"
 
 namespace facebook {

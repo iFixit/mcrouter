@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -97,6 +97,9 @@ void expectEqTestRequest(const TestRequest& a, const TestRequest& b) {
 
   EXPECT_EQ(a.testType().name, b.testType().name);
   EXPECT_EQ(a.testType().points, b.testType().points);
+
+  EXPECT_EQ(a.testOptionalBool(), b.testOptionalBool());
+  EXPECT_EQ(a.testOptionalVec(), b.testOptionalVec());
 }
 
 } // util

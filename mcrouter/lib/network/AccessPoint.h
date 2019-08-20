@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -26,7 +26,7 @@ struct AccessPoint {
       mc_protocol_t protocol = mc_unknown_protocol,
       bool useSsl = false,
       bool compressed = false,
-      std::string hostname = "");
+      bool unixDomainSocket = false);
 
   /**
    * @param apString accepts host:port, host:port:protocol and
@@ -37,8 +37,6 @@ struct AccessPoint {
    *                     hostPortProtocol used
    * @param defaultCompressed The is the compression config to use if it's not
    *                          specified in the string.
-   * @param hostname  Name of the host that corresponds to this access point.
-   *                  Used only for logging.
    *
    * @return shared_ptr to an AccessPoint object
    */
@@ -47,15 +45,10 @@ struct AccessPoint {
       mc_protocol_t defaultProtocol,
       bool defaultUseSsl = false,
       uint16_t portOverride = 0,
-      bool defaultCompressed = false,
-      std::string hostname = "");
+      bool defaultCompressed = false);
 
   const std::string& getHost() const {
     return host_;
-  }
-
-  const std::string& getHostname() const {
-    return hostname_;
   }
 
   uint16_t getPort() const {
@@ -74,6 +67,10 @@ struct AccessPoint {
     return compressed_;
   }
 
+  bool isUnixDomainSocket() const {
+    return unixDomainSocket_;
+  }
+
   /**
    * @return [host]:port if address is IPv6, host:port otherwise
    */
@@ -89,11 +86,12 @@ struct AccessPoint {
  private:
   std::string host_;
   uint16_t port_;
-  mc_protocol_t protocol_;
+  mc_protocol_t protocol_ : 8;
   bool useSsl_{false};
-  bool isV6_{false};
   bool compressed_{false};
-  std::string hostname_;
+  bool isV6_{false};
+  bool unixDomainSocket_{false};
 };
-}
-} // facebook::memcache
+
+} // memcache
+} // facebook

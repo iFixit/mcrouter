@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -67,10 +67,6 @@ Fifo::~Fifo() {
       PLOG(ERROR) << "Error removing debug fifo file";
     }
   }
-}
-
-bool Fifo::isConnected() const noexcept {
-  return fd_ >= 0;
 }
 
 bool Fifo::tryConnect() noexcept {

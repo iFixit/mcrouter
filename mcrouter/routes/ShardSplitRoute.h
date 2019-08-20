@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -115,8 +115,7 @@ class ShardSplitRoute {
       size_t i = globals::hostid() % splitSize;
       // Note that foreachPossibleClient always calls traverse on a request with
       // no flags set.
-      if (i == 0 || (carbon::GetLike<Request>::value &&
-                     alwaysSendToMainShardSplit(req.flags()))) {
+      if (i == 0) {
         t(*rh_, req);
         return;
       }
@@ -145,8 +144,7 @@ class ShardSplitRoute {
       return rh_->route(req);
     } else {
       size_t i = globals::hostid() % splitSize;
-      if (i == 0 || (carbon::GetLike<Request>::value &&
-                     alwaysSendToMainShardSplit(req.flags()))) {
+      if (i == 0) {
         return rh_->route(req);
       }
       return rh_->route(splitReq(req, i, shard));

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -62,10 +62,10 @@ class FifoReadCallback : public folly::AsyncReader::ReadCallback {
       std::string fifoName,
       const MessageReadyFn& messageReady) noexcept;
 
-  void getReadBuffer(void** bufReturn, size_t* lenReturn) override final;
-  void readDataAvailable(size_t len) noexcept override final;
-  void readEOF() noexcept override final;
-  void readErr(const folly::AsyncSocketException& ex) noexcept override final;
+  void getReadBuffer(void** bufReturn, size_t* lenReturn) final;
+  void readDataAvailable(size_t len) noexcept final;
+  void readEOF() noexcept final;
+  void readErr(const folly::AsyncSocketException& ex) noexcept final;
 
  private:
   static constexpr uint64_t kMinSize{256};

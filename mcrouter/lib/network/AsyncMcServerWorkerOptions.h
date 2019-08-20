@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -33,6 +33,11 @@ struct AsyncMcServerWorkerOptions {
    * is completed.
    */
   bool singleWrite{false};
+
+  /**
+   * If true, time measurement in event base is enabled.
+   */
+  bool enableEventBaseTimeMeasurement{false};
 
   /**
    * Maximum number of read system calls per event loop iteration.

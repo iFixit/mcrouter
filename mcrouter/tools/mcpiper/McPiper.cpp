@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -12,7 +12,6 @@
 #include <unordered_set>
 
 #include "mcrouter/lib/network/CarbonMessageList.h"
-
 #include "mcrouter/tools/mcpiper/FifoReader.h"
 #include "mcrouter/tools/mcpiper/MessagePrinter.h"
 
@@ -121,9 +120,11 @@ MessagePrinter::Filter getFilter(const Settings& settings) {
 
 void McPiper::stop() {
   running_ = false;
-  if (fifoReaderManager_) {
-    fifoReaderManager_->unregisterCallbacks();
-  }
+  eventBase_.runInEventBaseThread([this]() {
+    if (fifoReaderManager_) {
+      fifoReaderManager_->unregisterCallbacks();
+    }
+  });
 }
 
 void McPiper::run(Settings settings, std::ostream& targetOut) {
@@ -180,15 +181,14 @@ void McPiper::run(Settings settings, std::ostream& targetOut) {
 
   initCompression();
 
-  folly::EventBase eventBase;
   fifoReaderManager_ = std::make_unique<FifoReaderManager>(
-      eventBase,
+      eventBase_,
       fifoReaderCallback,
       settings.fifoRoot,
       std::move(filenamePattern));
 
   while (running_) {
-    eventBase.loopOnce();
+    eventBase_.loopOnce();
   }
 
   fifoReaderManager_.reset();

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -96,7 +96,8 @@ TEST(CarbonMessageConversionUtils, toFollyDynamic_Complex) {
       folly::dynamic::object("hello", folly::dynamic::array(1, 1, 1))(
           "world", folly::dynamic::array(2, 2, 2)))(
       "testUSet", folly::dynamic::array("hello", "world"))(
-      "testSet", folly::dynamic::array(123, 456))("testType", "(user type)");
+      "testSet", folly::dynamic::array(123, 456))("testType", "(user type)")(
+      "testOptionalVec", folly::dynamic::array());
 
   auto dynamic = carbon::convertToFollyDynamic(r);
   auto set = dynamic.at("testUSet");

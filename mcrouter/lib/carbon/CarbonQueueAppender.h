@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -14,10 +14,10 @@
 #include <type_traits>
 #include <utility>
 
-#include <folly/Bits.h>
 #include <folly/Optional.h>
 #include <folly/Varint.h>
 #include <folly/io/IOBuf.h>
+#include <folly/lang/Bits.h>
 
 namespace folly {
 class IOBuf;
@@ -28,7 +28,7 @@ namespace carbon {
 class CarbonQueueAppenderStorage {
  public:
   CarbonQueueAppenderStorage() {
-    iovs_[0] = {headerBuf_, 0};
+    iovs_[0] = {storage_, 0};
   }
 
   CarbonQueueAppenderStorage(const CarbonQueueAppenderStorage&) = delete;
@@ -36,6 +36,14 @@ class CarbonQueueAppenderStorage {
       delete;
 
   void append(const folly::IOBuf& buf) {
+    // IOBuf copy is a very expensive procedure (64 bytes object + atomic
+    // operation), avoid incuring that cost for small buffers.
+    if (!buf.isChained() && buf.length() <= kInlineIOBufLen &&
+        storageIdx_ + buf.length() <= sizeof(storage_)) {
+      push(buf.data(), buf.length());
+      return;
+    }
+
     finalizeLastIovec();
 
     if (nIovsUsed_ == kMaxIovecs) {
@@ -97,18 +105,20 @@ class CarbonQueueAppenderStorage {
   void coalesce();
 
   void reset() {
-    storageIdx_ = 0;
+    storageIdx_ = kMaxHeaderLength;
     head_.clear();
     // Reserve first element of iovs_ for header, which won't be filled in
     // until after body data is serialized.
-    iovs_[0] = {headerBuf_, 0};
+    iovs_[0] = {storage_, 0};
     nIovsUsed_ = 1;
     canUsePreviousIov_ = false;
+    headerOverlap_ = 0;
   }
 
   std::pair<const struct iovec*, size_t> getIovecs() {
     finalizeLastIovec();
-    return std::make_pair(iovs_, nIovsUsed_);
+    return iovs_[0].iov_len == 0 ? std::make_pair(iovs_ + 1, nIovsUsed_ - 1)
+                                 : std::make_pair(iovs_, nIovsUsed_);
   }
 
   size_t computeBodySize() {
@@ -118,23 +128,33 @@ class CarbonQueueAppenderStorage {
     for (size_t i = 1; i < nIovsUsed_; ++i) {
       bodySize += iovs_[i].iov_len;
     }
-    return bodySize;
+    return bodySize - headerOverlap_;
   }
 
   // Hack: we expose headerBuf_ so users can write directly to it.
   // It is the responsibility of the user to report how much data was written
   // via reportHeaderSize().
   uint8_t* getHeaderBuf() {
-    assert(iovs_[0].iov_base == headerBuf_);
-    return headerBuf_;
+    assert(iovs_[0].iov_base == storage_);
+    return storage_;
   }
 
   void reportHeaderSize(size_t headerSize) {
-    iovs_[0].iov_len = headerSize;
+    // First iovec optimization.
+    if (nIovsUsed_ > 1 && iovs_[1].iov_base == storage_ + kMaxHeaderLength) {
+      iovs_[1].iov_base = storage_ + (kMaxHeaderLength - headerSize);
+      memmove(iovs_[1].iov_base, storage_, headerSize);
+      iovs_[1].iov_len += headerSize;
+      iovs_[0].iov_len = 0;
+      headerOverlap_ = headerSize;
+    } else {
+      iovs_[0].iov_len = headerSize;
+    }
   }
 
  private:
   static constexpr size_t kMaxIovecs{32};
+  static constexpr size_t kInlineIOBufLen{128};
 
   // Copied from UmbrellaProtocol.h, which will eventually die
   static constexpr size_t kMaxAdditionalFields = 3;
@@ -144,15 +164,14 @@ class CarbonQueueAppenderStorage {
       2 * kMaxAdditionalFields *
           folly::kMaxVarintLength64; /* key and value for additional fields */
 
-  size_t storageIdx_{0};
+  size_t storageIdx_{kMaxHeaderLength};
   size_t nIovsUsed_{1};
+  size_t headerOverlap_{0};
   bool canUsePreviousIov_{false};
 
-  // For safety reasons, we use another buffer for the header data
-  uint8_t headerBuf_[kMaxHeaderLength];
   // Buffer used for non-IOBuf data, e.g., ints, strings, and protocol
   // data
-  uint8_t storage_[512];
+  uint8_t storage_[512 + kMaxHeaderLength];
 
   // The first iovec in iovs_ points to Caret message header data, and nothing
   // else. The remaining iovecs are used for the message body. Note that we do

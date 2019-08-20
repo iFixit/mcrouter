@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -19,7 +19,9 @@
 #include "mcrouter/ProxyBase.h"
 #include "mcrouter/config.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
+#include "mcrouter/lib/carbon/RequestReplyUtil.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
+#include "mcrouter/lib/mc/msg.h"
 #include "mcrouter/routes/RouteHandleMap.h"
 
 namespace facebook {
@@ -34,9 +36,9 @@ class RootRoute {
   }
 
   RootRoute(
-      ProxyBase* proxy,
+      ProxyBase& proxy,
       const RouteSelectorMap<RouteHandleIf>& routeSelectors)
-      : opts_(proxy->getRouterOptions()),
+      : opts_(proxy.getRouterOptions()),
         rhMap_(
             routeSelectors,
             opts_.default_route,
@@ -99,7 +101,14 @@ class RootRoute {
         !rh.empty()) {
       /* rh.empty() case: for backwards compatibility,
          always surface invalid routing errors */
+      auto originalResult = reply.result();
       reply = createReply(DefaultReply, req);
+      carbon::setMessageIfPresent(
+          reply,
+          folly::to<std::string>(
+              "Error reply transformed into miss due to miss_on_get_errors. "
+              "Original reply result: ",
+              mc_res_to_string(originalResult)));
     }
     return reply;
   }

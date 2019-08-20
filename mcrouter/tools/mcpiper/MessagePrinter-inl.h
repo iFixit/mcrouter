@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,6 +13,7 @@
 
 #include "mcrouter/lib/network/AsciiSerialized.h"
 #include "mcrouter/lib/network/McSerializedRequest.h"
+#include "mcrouter/lib/network/ServerLoad.h"
 #include "mcrouter/lib/network/gen/Memcache.h"
 #include "mcrouter/tools/mcpiper/Color.h"
 #include "mcrouter/tools/mcpiper/Config.h"
@@ -77,22 +78,23 @@ constexpr typename std::
 }
 
 template <class Reply>
-typename std::enable_if<
+typename std::enable_if_t<
     !std::is_same<RequestFromReplyType<Reply, RequestReplyPairs>, void>::value,
-    void>::type
+    bool>
 prepareUmbrellaRawReply(
     UmbrellaSerializedMessage& umbrellaSerializedMessage,
     Reply&& reply,
     uint64_t reqid,
     const struct iovec*& iovOut,
     size_t& niovOut) {
-  umbrellaSerializedMessage.prepare(std::move(reply), reqid, iovOut, niovOut);
+  return umbrellaSerializedMessage.prepare(
+      std::move(reply), reqid, iovOut, niovOut);
 }
 
 template <class Reply>
-typename std::enable_if<
+typename std::enable_if_t<
     std::is_same<RequestFromReplyType<Reply, RequestReplyPairs>, void>::value,
-    void>::type
+    bool>
 prepareUmbrellaRawReply(
     UmbrellaSerializedMessage&,
     Reply&&,
@@ -101,6 +103,7 @@ prepareUmbrellaRawReply(
     size_t& /* niovOut */) {
   LOG(ERROR) << "Umbrella Protocol does not support a reply type"
              << " that is not Memcache compatible!";
+  return false;
 }
 
 } // detail
@@ -119,8 +122,7 @@ void MessagePrinter::requestReady(
           mc_res_unknown,
           from,
           to,
-          protocol,
-          0 /* latency is undefined when request is sent */)) {
+          protocol)) {
     if (options_.raw) {
       printRawRequest(msgId, request, protocol);
     } else {
@@ -140,7 +142,15 @@ void MessagePrinter::replyReady(
     int64_t latencyUs,
     ReplyStatsContext replyStatsContext) {
   if (auto out = filterAndBuildOutput(
-          msgId, reply, key, reply.result(), from, to, protocol, latencyUs)) {
+          msgId,
+          reply,
+          key,
+          reply.result(),
+          from,
+          to,
+          protocol,
+          latencyUs,
+          replyStatsContext.serverLoad)) {
     stats_.numBytesBeforeCompression +=
         replyStatsContext.replySizeBeforeCompression;
     stats_.numBytesAfterCompression +=
@@ -162,7 +172,8 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
     const folly::SocketAddress& from,
     const folly::SocketAddress& to,
     mc_protocol_t protocol,
-    int64_t latencyUs) {
+    int64_t latencyUs,
+    const ServerLoad& serverLoad) {
   ++stats_.totalMessages;
 
   if (!matchAddress(from, to)) {
@@ -238,6 +249,17 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
     out.append(folly::to<std::string>(latencyUs), format_.dataValueColor);
   }
 
+  if (!serverLoad.isZero()) {
+    if (options_.script) {
+      out.append(",\n  \"server_load_percent\": ");
+    } else {
+      out.append("\n  server load: ", format_.msgAttrColor);
+    }
+    out.append(
+        folly::sformat("{:.2f}%", serverLoad.percentLoad()),
+        format_.dataValueColor);
+  }
+
   if (options_.script) {
     out.append(",\n  \"flags\": ");
     out.append(folly::to<std::string>(message.flags()));
@@ -264,9 +286,8 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
     }
   }
   if (options_.script) {
-    out.append(",\n  \"message\": {");
+    out.pushBack(',');
     out.append(getTypeSpecificAttributes(message));
-    out.append("\n  }");
   } else {
     out.append(getTypeSpecificAttributes(message));
   }
@@ -347,24 +368,31 @@ void MessagePrinter::printRawReply(
   switch (protocol) {
     case mc_ascii_protocol:
       LOG_FIRST_N(INFO, 1) << "ASCII protocol is not supported for raw data";
-      break;
+      return;
     case mc_umbrella_protocol_DONOTUSE:
-      detail::prepareUmbrellaRawReply(
-          umbrellaSerializedMessage,
-          std::move(reply),
-          msgId,
-          iovsBegin,
-          iovsCount);
+      if (!detail::prepareUmbrellaRawReply(
+              umbrellaSerializedMessage,
+              std::move(reply),
+              msgId,
+              iovsBegin,
+              iovsCount)) {
+        LOG(ERROR) << "Serialization failed for umbrella reply " << msgId;
+        return;
+      }
       break;
     case mc_caret_protocol:
-      caretSerializedMessage.prepare(
-          std::move(reply),
-          msgId,
-          CodecIdRange::Empty,
-          nullptr, /* codec map */
-          0.0, /* drop probability */
-          iovsBegin,
-          iovsCount);
+      if (!caretSerializedMessage.prepare(
+              std::move(reply),
+              msgId,
+              CodecIdRange::Empty,
+              nullptr, /* codec map */
+              0.0, /* drop probability */
+              ServerLoad::zero(),
+              iovsBegin,
+              iovsCount)) {
+        LOG(ERROR) << "Serialization failed for caret reply " << msgId;
+        return;
+      }
       break;
     default:
       CHECK(false);
@@ -382,9 +410,13 @@ void MessagePrinter::printRawRequest(
     LOG_FIRST_N(INFO, 1) << "ASCII protocol is not supported for raw data";
     return;
   }
-  McSerializedRequest req(request, msgId, protocol, CodecIdRange::Empty);
 
-  printRawMessage(req.getIovs(), req.getIovsCount());
+  McSerializedRequest req(request, msgId, protocol, CodecIdRange::Empty);
+  if (req.serializationResult() == McSerializedRequest::Result::OK) {
+    printRawMessage(req.getIovs(), req.getIovsCount());
+  } else {
+    LOG(ERROR) << "Serialization failed for request " << msgId << ".";
+  }
 }
 
 template <class Message>

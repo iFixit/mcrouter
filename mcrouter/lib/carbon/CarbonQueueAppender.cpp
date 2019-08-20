@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -21,7 +21,7 @@ void CarbonQueueAppenderStorage::coalesce() {
 
   canUsePreviousIov_ = false;
   nIovsUsed_ = 1; // headerBuf_ always considered used
-  storageIdx_ = 0;
+  storageIdx_ = kMaxHeaderLength;
 
   size_t newCapacity = 0;
   // coalesce() should always be triggered before writing header

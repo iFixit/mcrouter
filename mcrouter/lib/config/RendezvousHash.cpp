@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,7 +13,7 @@
 #include <cmath>
 #include <limits>
 
-#include <folly/Hash.h>
+#include <folly/hash/Hash.h>
 
 namespace facebook {
 namespace memcache {

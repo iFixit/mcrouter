@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -15,10 +15,12 @@ namespace memcache {
 Notifier::Notifier(
     size_t noNotifyRate,
     int64_t waitThreshold,
-    NowUsecFunc nowFunc) noexcept
+    NowUsecFunc nowFunc,
+    std::function<bool(bool)> postDrainCallback) noexcept
     : noNotifyRate_(noNotifyRate),
       waitThreshold_(waitThreshold),
       nowFunc_(nowFunc),
+      postDrainCallback_(std::move(postDrainCallback)),
       lastTimeUsec_(nowFunc_()),
       state_(State::EMPTY) {}
 

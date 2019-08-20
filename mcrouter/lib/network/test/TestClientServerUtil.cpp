@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -27,8 +27,13 @@
 #include "mcrouter/lib/network/AsyncMcClient.h"
 #include "mcrouter/lib/network/AsyncMcServer.h"
 #include "mcrouter/lib/network/AsyncMcServerWorker.h"
+#include "mcrouter/lib/network/ReplyStatsContext.h"
 #include "mcrouter/lib/network/ThreadLocalSSLContextProvider.h"
 #include "mcrouter/lib/network/test/ListenSocket.h"
+
+namespace folly {
+class AsyncSocket;
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -45,6 +50,13 @@ const char* const kInvalidKeyPath = "/do/not/exist";
 const char* const kInvalidCertPath = "/do/not/exist";
 
 const char* const kServerVersion = "TestServer-1.0";
+
+SSLContextProvider validClientSsl() {
+  return []() {
+    return getSSLContext(
+        kValidCertPath, kValidKeyPath, kPemCaPath, folly::none, true);
+  };
+}
 
 SSLContextProvider validSsl() {
   return
@@ -145,7 +157,8 @@ TestServer::TestServer(
     bool useDefaultVersion,
     size_t numThreads,
     bool useTicketKeySeeds,
-    size_t goAwayTimeoutMs)
+    size_t goAwayTimeoutMs,
+    bool tfoEnabled)
     : outOfOrder_(outOfOrder), useTicketKeySeeds_(useSsl && useTicketKeySeeds) {
   opts_.existingSocketFd = sock_.getSocketFd();
   opts_.numThreads = numThreads;
@@ -158,6 +171,10 @@ TestServer::TestServer(
     opts_.pemKeyPath = kValidKeyPath;
     opts_.pemCertPath = kValidCertPath;
     opts_.pemCaPath = kPemCaPath;
+    if (tfoEnabled) {
+      opts_.tfoEnabledForSsl = true;
+      opts_.tfoQueueSize = 100000;
+    }
   }
 }
 
@@ -213,15 +230,21 @@ TestClient::TestClient(
     mc_protocol_t protocol,
     SSLContextProvider ssl,
     uint64_t qosClass,
-    uint64_t qosPath)
+    uint64_t qosPath,
+    std::string serviceIdentity,
+    const CompressionCodecMap* compressionCodecMap,
+    bool enableTfo)
     : fm_(std::make_unique<folly::fibers::EventBaseLoopController>()) {
   dynamic_cast<folly::fibers::EventBaseLoopController&>(fm_.loopController())
       .attachEventBase(eventBase_);
   ConnectionOptions opts(host, port, protocol);
   opts.writeTimeout = std::chrono::milliseconds(timeoutMs);
+  opts.compressionCodecMap = compressionCodecMap;
   if (ssl) {
     opts.sslContextProvider = std::move(ssl);
     opts.sessionCachingEnabled = true;
+    opts.sslServiceIdentity = serviceIdentity;
+    opts.tfoEnabledForSsl = enableTfo;
   }
   if (qosClass != 0 || qosPath != 0) {
     opts.enableQoS = true;
@@ -230,7 +253,7 @@ TestClient::TestClient(
   }
   client_ = std::make_unique<AsyncMcClient>(eventBase_, opts);
   client_->setStatusCallbacks(
-      [] { LOG(INFO) << "Client UP."; },
+      [](const folly::AsyncSocket&) { LOG(INFO) << "Client UP."; },
       [](AsyncMcClient::ConnectionDownReason reason) {
         if (reason == AsyncMcClient::ConnectionDownReason::SERVER_GONE_AWAY) {
           LOG(INFO) << "Server gone Away.";
@@ -256,12 +279,12 @@ TestClient::TestClient(
 }
 
 void TestClient::setStatusCallbacks(
-    std::function<void()> onUp,
+    std::function<void(const folly::AsyncSocket&)> onUp,
     std::function<void(AsyncMcClient::ConnectionDownReason)> onDown) {
   client_->setStatusCallbacks(
-      [onUp] {
+      [onUp](const folly::AsyncSocket& socket) {
         LOG(INFO) << "Client UP.";
-        onUp();
+        onUp(socket);
       },
       [onDown](AsyncMcClient::ConnectionDownReason reason) {
         if (reason == AsyncMcClient::ConnectionDownReason::SERVER_GONE_AWAY) {
@@ -276,16 +299,29 @@ void TestClient::setStatusCallbacks(
 void TestClient::sendGet(
     std::string key,
     mc_res_t expectedResult,
-    uint32_t timeoutMs) {
+    uint32_t timeoutMs,
+    std::function<void(const ReplyStatsContext&)> replyStatsCallback) {
   inflight_++;
-  fm_.addTask([ key = std::move(key), expectedResult, this, timeoutMs ]() {
+  fm_.addTask([
+    key = std::move(key),
+    expectedResult,
+    replyStatsCallback = std::move(replyStatsCallback),
+    this,
+    timeoutMs
+  ]() {
     McGetRequest req(key);
     if (req.key().fullKey() == "trace_id") {
       req.setTraceId({12345, 67890});
     }
 
     try {
-      auto reply = client_->sendSync(req, std::chrono::milliseconds(timeoutMs));
+      ReplyStatsContext replyStatsContext;
+      auto reply = client_->sendSync(
+          req, std::chrono::milliseconds(timeoutMs), &replyStatsContext);
+      if (replyStatsCallback) {
+        replyStatsCallback(replyStatsContext);
+      }
+
       if (reply.result() == mc_res_found) {
         auto value = carbon::valueRangeSlow(reply);
         if (req.key().fullKey() == "empty") {
@@ -315,9 +351,10 @@ void TestClient::sendGet(
       }
       checkLogic(
           expectedResult == reply.result(),
-          "Expected {}, got {}",
+          "Expected {}, got {} for key '{}'",
           mc_res_to_string(expectedResult),
-          mc_res_to_string(reply.result()));
+          mc_res_to_string(reply.result()),
+          req.key().fullKey());
     } catch (const std::exception& e) {
       CHECK(false) << "Failed: " << e.what();
     }
@@ -328,18 +365,25 @@ void TestClient::sendGet(
 void TestClient::sendSet(
     std::string key,
     std::string value,
-    mc_res_t expectedResult) {
+    mc_res_t expectedResult,
+    std::function<void(const ReplyStatsContext&)> replyStatsCallback) {
   inflight_++;
   fm_.addTask([
     key = std::move(key),
     value = std::move(value),
     expectedResult,
+    replyStatsCallback = std::move(replyStatsCallback),
     this
   ]() {
     McSetRequest req(key);
     req.value() = folly::IOBuf::wrapBufferAsValue(folly::StringPiece(value));
 
-    auto reply = client_->sendSync(req, std::chrono::milliseconds(200));
+    ReplyStatsContext replyStatsContext;
+    auto reply = client_->sendSync(
+        req, std::chrono::milliseconds(200), &replyStatsContext);
+    if (replyStatsCallback) {
+      replyStatsCallback(replyStatsContext);
+    }
 
     CHECK(expectedResult == reply.result())
         << "Expected: " << mc_res_to_string(expectedResult) << " got "

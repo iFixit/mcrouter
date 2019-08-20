@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -94,6 +94,8 @@ struct TestHandleImpl {
   std::vector<uint32_t> sawExptimes;
 
   std::vector<std::string> sawOperations;
+
+  std::vector<int64_t> sawLeaseTokensSet;
 
   bool isTko;
 
@@ -194,7 +196,19 @@ struct RecordingRoute {
       : dataGet_(g_td), dataUpdate_(u_td), dataDelete_(d_td), h_(h) {}
 
   template <class Request>
-  ReplyT<Request> route(const Request& req) {
+  ReplyT<Request> route(
+      const Request& req,
+      carbon::OtherThanT<Request, McLeaseSetRequest> = 0) {
+    return routeInternal(req);
+  }
+
+  McLeaseSetReply route(const McLeaseSetRequest& req) {
+    h_->sawLeaseTokensSet.push_back(req.leaseToken());
+    return routeInternal(req);
+  }
+
+  template <class Request>
+  ReplyT<Request> routeInternal(const Request& req) {
     ReplyT<Request> reply;
 
     if (h_->isTko) {

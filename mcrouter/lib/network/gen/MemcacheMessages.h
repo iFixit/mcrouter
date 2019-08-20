@@ -148,10 +148,10 @@ class McGetReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   folly::Optional<folly::IOBuf> value_;
   uint64_t flags_{0};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -211,9 +211,9 @@ class McSetRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McSetReply : public carbon::ReplyCommon {
@@ -275,10 +275,10 @@ class McSetReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   uint64_t flags_{0};
   folly::IOBuf value_;
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -339,8 +339,8 @@ class McDeleteRequest : public carbon::RequestCommon {
  private:
   carbon::Keys<folly::IOBuf> key_;
   uint64_t flags_{0};
-  int32_t exptime_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McDeleteReply : public carbon::ReplyCommon {
@@ -402,10 +402,10 @@ class McDeleteReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   uint64_t flags_{0};
   folly::IOBuf value_;
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -415,7 +415,7 @@ class McLeaseGetRequest : public carbon::RequestCommon {
  public:
   using reply_type = McLeaseGetReply;
   static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
+  static constexpr bool hasFlags = true;
   static constexpr bool hasKey = true;
   static constexpr bool hasValue = false;
   static constexpr size_t typeId = 7;
@@ -437,7 +437,10 @@ class McLeaseGetRequest : public carbon::RequestCommon {
     return key_;
   }
   uint64_t flags() const {
-    return 0;
+    return flags_;
+  }
+  uint64_t& flags() {
+    return flags_;
   }
   int32_t exptime() const {
     return 0;
@@ -454,6 +457,7 @@ class McLeaseGetRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
+  uint64_t flags_{0};
 };
 
 class McLeaseGetReply : public carbon::ReplyCommon {
@@ -522,11 +526,11 @@ class McLeaseGetReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   int64_t leaseToken_{0};
   folly::Optional<folly::IOBuf> value_;
   uint64_t flags_{0};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -592,10 +596,10 @@ class McLeaseSetRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
   int64_t leaseToken_{0};
+  int32_t exptime_{0};
 };
 
 class McLeaseSetReply : public carbon::ReplyCommon {
@@ -649,8 +653,8 @@ class McLeaseSetReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -710,9 +714,9 @@ class McAddRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McAddReply : public carbon::ReplyCommon {
@@ -765,8 +769,8 @@ class McAddReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -826,9 +830,9 @@ class McReplaceRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McReplaceReply : public carbon::ReplyCommon {
@@ -882,8 +886,8 @@ class McReplaceReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -999,11 +1003,11 @@ class McGetsReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   uint64_t casToken_{0};
   folly::Optional<folly::IOBuf> value_;
   uint64_t flags_{0};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1069,10 +1073,10 @@ class McCasRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
   uint64_t casToken_{0};
+  int32_t exptime_{0};
 };
 
 class McCasReply : public carbon::ReplyCommon {
@@ -1125,8 +1129,8 @@ class McCasReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1240,9 +1244,9 @@ class McIncrReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   int64_t delta_{0};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1356,9 +1360,9 @@ class McDecrReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   int64_t delta_{0};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1481,12 +1485,12 @@ class McMetagetReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
-  int32_t age_{0};
-  int32_t exptime_{0};
-  int16_t ipv_{0};
   std::string ipAddress_;
   std::string message_;
+  int32_t age_{0};
+  int32_t exptime_{0};
+  carbon::Result result_{mc_res_unknown};
+  int16_t ipv_{0};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1546,9 +1550,9 @@ class McAppendRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McAppendReply : public carbon::ReplyCommon {
@@ -1601,8 +1605,8 @@ class McAppendReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1662,9 +1666,9 @@ class McPrependRequest : public carbon::RequestCommon {
 
  private:
   carbon::Keys<folly::IOBuf> key_;
-  int32_t exptime_{0};
   uint64_t flags_{0};
   folly::IOBuf value_;
+  int32_t exptime_{0};
 };
 
 class McPrependReply : public carbon::ReplyCommon {
@@ -1718,8 +1722,8 @@ class McPrependReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1824,8 +1828,8 @@ class McTouchReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -1927,8 +1931,8 @@ class McFlushReReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
@@ -2037,12 +2041,12 @@ class McFlushAllReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
   std::string message_;
+  carbon::Result result_{mc_res_unknown};
   int16_t appSpecificErrorCode_{0};
 };
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook
 
 #include "MemcacheMessages-inl.h"

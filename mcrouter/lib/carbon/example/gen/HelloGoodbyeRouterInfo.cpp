@@ -24,7 +24,6 @@
 #include <mcrouter/routes/ExtraRouteHandleProviderIf.h>
 #include <mcrouter/routes/McRouteHandleProvider.h>
 
-#include <mcrouter/lib/routes/HashRoute.h>
 #include <mcrouter/lib/routes/NullRoute.h>
 #include <mcrouter/routes/AllAsyncRouteFactory.h>
 #include <mcrouter/routes/AllFastestRouteFactory.h>
@@ -32,11 +31,12 @@
 #include <mcrouter/routes/AllMajorityRouteFactory.h>
 #include <mcrouter/routes/AllSyncRouteFactory.h>
 #include <mcrouter/routes/DevNullRoute.h>
-#include <mcrouter/routes/ErrorRouteFactory.h>
+#include <mcrouter/routes/ErrorRoute.h>
 #include <mcrouter/routes/FailoverRoute.h>
 #include <mcrouter/routes/HashRouteFactory.h>
 #include <mcrouter/routes/HostIdRouteFactory.h>
 #include <mcrouter/routes/LatestRoute.h>
+#include <mcrouter/routes/LoadBalancerRoute.h>
 #include <mcrouter/routes/LoggingRoute.h>
 #include <mcrouter/routes/MigrateRouteFactory.h>
 #include <mcrouter/routes/MissFailoverRoute.h>
@@ -71,6 +71,7 @@ HelloGoodbyeRouterInfo::buildRouteMap() {
        }},
       {"HostIdRoute", &makeHostIdRoute<HelloGoodbyeRouterInfo>},
       {"LatestRoute", &makeLatestRoute<HelloGoodbyeRouterInfo>},
+      {"LoadBalancerRoute", &makeLoadBalancerRoute<HelloGoodbyeRouterInfo>},
       {"LoggingRoute", &makeLoggingRoute<HelloGoodbyeRouterInfo>},
       {"MigrateRoute", &makeMigrateRoute<HelloGoodbyeRouterInfo>},
       {"MissFailoverRoute", &makeMissFailoverRoute<HelloGoodbyeRouterInfo>},
@@ -90,4 +91,4 @@ HelloGoodbyeRouterInfo::buildExtraProvider() {
   return std::make_unique<McExtraRouteHandleProvider<HelloGoodbyeRouterInfo>>();
 }
 
-} // hellogoodbye
+} // namespace hellogoodbye

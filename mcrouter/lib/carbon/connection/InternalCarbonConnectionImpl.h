@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -55,6 +55,16 @@ class InternalCarbonConnectionImpl {
         facebook::memcache::mcrouter::CarbonRouterInstance<
             typename If::RouterInfo>::init(persistenceId, mcrouterOptions),
         options);
+  }
+
+  explicit InternalCarbonConnectionImpl(
+      facebook::memcache::mcrouter::CarbonRouterInstance<
+          typename If::RouterInfo>& router,
+      const InternalCarbonConnectionOptions& options =
+          InternalCarbonConnectionOptions(),
+      RecreateFunc recreateFunc = nullptr)
+      : recreateFunc_(std::move(recreateFunc)) {
+    init(&router, options);
   }
 
   explicit InternalCarbonConnectionImpl(

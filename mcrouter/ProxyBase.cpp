@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2016-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -31,6 +31,23 @@ folly::fibers::FiberManager::Options ProxyBase::getFiberManagerOptions(
   fmOpts.useGuardPages = opts.fibers_use_guard_pages;
   fmOpts.fibersPoolResizePeriodMs = opts.fibers_pool_resize_period_ms;
   return fmOpts;
+}
+
+void ProxyBase::FlushCallback::runLoopCallback() noexcept {
+  // Always reschedlue until the end of event loop.
+  if (!rescheduled_) {
+    rescheduled_ = true;
+    proxy_.eventBase().getEventBase().runInLoop(this, true /* thisIteration */);
+    return;
+  }
+  rescheduled_ = false;
+
+  auto cbs = std::move(flushList_);
+  while (!cbs.empty()) {
+    folly::EventBase::LoopCallback* callback = &cbs.front();
+    cbs.pop_front();
+    callback->runLoopCallback();
+  }
 }
 
 } // mcrouter

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -26,8 +26,16 @@
 #include "mcrouter/lib/network/gen/Memcache.h"
 #include "mcrouter/lib/network/test/ListenSocket.h"
 
+namespace folly {
+class AsyncSocket;
+} // namespace folly
+
 namespace facebook {
 namespace memcache {
+
+class CompressionCodecMap;
+struct ReplyStatsContext;
+
 namespace test {
 
 class TestServerOnRequest {
@@ -50,7 +58,7 @@ class TestServerOnRequest {
       McServerRequestContext::reply(std::move(context), std::move(reply));
     } else {
       waitingReplies_.push_back(
-          [ ctx = std::move(context), reply = std::move(reply) ]() mutable {
+          [ctx = std::move(context), reply = std::move(reply)]() mutable {
             McServerRequestContext::reply(std::move(ctx), std::move(reply));
           });
       if (waitingReplies_.size() == 1) {
@@ -79,7 +87,9 @@ class TestServer {
       bool useDefaultVersion = false,
       size_t numThreads = 1,
       bool useTicketKeySeeds = false,
-      size_t goAwayTimeoutMs = 1000) {
+      size_t goAwayTimeoutMs = 1000,
+      const CompressionCodecMap* compressionCodecMap = nullptr,
+      bool tfoEnabled = false) {
     std::unique_ptr<TestServer> server(new TestServer(
         outOfOrder,
         useSsl,
@@ -89,11 +99,14 @@ class TestServer {
         useDefaultVersion,
         numThreads,
         useTicketKeySeeds,
-        goAwayTimeoutMs));
-    server->run([& s = *server](AsyncMcServerWorker & worker) {
-      worker.setOnRequest(
-          MemcacheRequestHandler<OnRequest>(s.shutdownLock_, s.outOfOrder_));
-    });
+        goAwayTimeoutMs,
+        tfoEnabled));
+    server->run(
+        [compressionCodecMap, &s = *server](AsyncMcServerWorker& worker) {
+          worker.setCompressionCodecMap(compressionCodecMap);
+          worker.setOnRequest(MemcacheRequestHandler<OnRequest>(
+              s.shutdownLock_, s.outOfOrder_));
+        });
     return server;
   }
 
@@ -134,7 +147,8 @@ class TestServer {
       bool useDefaultVersion,
       size_t numThreads,
       bool useTicketKeySeeds,
-      size_t goAwayTimeoutMs);
+      size_t goAwayTimeoutMs,
+      bool tfoEnabled);
 
   void run(std::function<void(AsyncMcServerWorker&)> init);
 };
@@ -145,7 +159,9 @@ using SSLContextProvider = std::function<std::shared_ptr<folly::SSLContext>()>;
 constexpr std::nullptr_t noSsl() {
   return nullptr;
 }
-// valid client SSL certs
+// valid Client SSL Certs
+SSLContextProvider validClientSsl();
+// valid SSL certs
 SSLContextProvider validSsl();
 // non-existent client SSL certs
 SSLContextProvider invalidSsl();
@@ -161,20 +177,32 @@ class TestClient {
       mc_protocol_t protocol = mc_ascii_protocol,
       SSLContextProvider ssl = noSsl(),
       uint64_t qosClass = 0,
-      uint64_t qosPath = 0);
+      uint64_t qosPath = 0,
+      std::string serviceIdentity = "",
+      const CompressionCodecMap* compressionCodecMap = nullptr,
+      bool enableTfo = false);
 
   void setThrottle(size_t maxInflight, size_t maxOutstanding) {
     client_->setThrottle(maxInflight, maxOutstanding);
   }
 
   void setStatusCallbacks(
-      std::function<void()> onUp,
+      std::function<void(const folly::AsyncSocket&)> onUp,
       std::function<void(AsyncMcClient::ConnectionDownReason)> onDown);
 
-  void
-  sendGet(std::string key, mc_res_t expectedResult, uint32_t timeoutMs = 200);
+  void sendGet(
+      std::string key,
+      mc_res_t expectedResult,
+      uint32_t timeoutMs = 200,
+      std::function<void(const ReplyStatsContext&)> replyStatsCallback =
+          nullptr);
 
-  void sendSet(std::string key, std::string value, mc_res_t expectedResult);
+  void sendSet(
+      std::string key,
+      std::string value,
+      mc_res_t expectedResult,
+      std::function<void(const ReplyStatsContext&)> replyStatsCallback =
+          nullptr);
 
   void sendVersion(std::string expectedVersion);
 

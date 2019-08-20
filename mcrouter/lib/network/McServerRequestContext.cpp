@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -102,5 +102,15 @@ double McServerRequestContext::getDropProbability() const {
 
   return dropProbability;
 }
+
+ServerLoad McServerRequestContext::getServerLoad() const noexcept {
+  if (session_) {
+    if (const auto& cpuController = session_->getCpuController()) {
+      return cpuController->getServerLoad();
+    }
+  }
+  return ServerLoad::zero();
 }
-} // facebook::memcache
+
+} // memcache
+} // facebook

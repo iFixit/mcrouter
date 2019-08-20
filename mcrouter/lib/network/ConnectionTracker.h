@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -55,7 +55,7 @@ class ConnectionTracker : public McServerSession::StateCallback {
   McServerSession& add(
       folly::AsyncTransportWrapper::UniquePtr transport,
       std::shared_ptr<McServerOnRequest> cb,
-      AsyncMcServerWorkerOptions options,
+      const AsyncMcServerWorkerOptions& options,
       void* userCtxt,
       const CompressionCodecMap* compressionCodecMap);
 
@@ -82,10 +82,10 @@ class ConnectionTracker : public McServerSession::StateCallback {
   void evict();
 
   // McServerSession::StateCallback API
-  void onWriteQuiescence(McServerSession& session) override final;
-  void onCloseStart(McServerSession& session) override final;
-  void onCloseFinish(McServerSession& session) override final;
-  void onShutdown() override final;
+  void onWriteQuiescence(McServerSession& session) final;
+  void onCloseStart(McServerSession& session) final;
+  void onCloseFinish(McServerSession& session) final;
+  void onShutdown() final;
 };
 }
 } // facebook::memcache

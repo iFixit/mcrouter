@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -13,11 +13,11 @@
 #include <random>
 
 #include <folly/Format.h>
-#include <folly/Hash.h>
 #include <folly/IPAddress.h>
 #include <folly/Optional.h>
 #include <folly/Random.h>
 #include <folly/String.h>
+#include <folly/hash/Hash.h>
 #include <folly/json.h>
 
 #include "mcrouter/lib/config/ImportResolverIf.h"
@@ -587,6 +587,21 @@ class ConfigPreprocessor::BuiltIns {
   }
 
   /**
+   * Casts its argument to double.
+   * Usage: @double(5.1)
+   */
+  static dynamic doubleMacro(Context&& ctx) {
+    try {
+      return ctx.at("value").asDouble();
+    } catch (const std::exception& e) {
+      throwLogic(
+          "Can not cast {} to double:\n{}",
+          ctx.at("value").typeName(),
+          e.what());
+    }
+  }
+
+  /**
    * Casts its argument to string.
    * Usage: @str(@int(5))
    */
@@ -688,28 +703,32 @@ class ConfigPreprocessor::BuiltIns {
   }
 
   /**
-   * Randomly shuffles list. Currently objects have no order, so it won't
-   * have any effect if dictionary is obj.
-   * Usage: @shuffle(list) or @shuffle(obj)
+   * Randomly shuffles list.
+   * Usage: @shuffle(list) or @shuffle(list, seed)
    *
-   * Returns list or object with randomly shuffled items.
+   * "dictionary": list
+   * "seed": int (optional, must be non-negative)
+   * Returns list with randomly shuffled items.
    */
   static dynamic shuffleMacro(Context&& ctx) {
-    auto dictionary = ctx.move("dictionary");
+    auto array = ctx.expandRawArg("dictionary");
+    checkLogic(array.isArray(), "Shuffle: argument must be an array");
 
-    checkLogic(
-        dictionary.isObject() || dictionary.isArray(),
-        "Shuffle: dictionary is not array/object");
+    static thread_local std::minstd_rand defaultEngine(
+        folly::randomNumberSeed());
 
-    static std::minstd_rand engine(folly::randomNumberSeed());
-    if (dictionary.isArray()) {
-      for (size_t i = 0; i < dictionary.size(); ++i) {
-        std::uniform_int_distribution<size_t> d(i, dictionary.size() - 1);
-        std::swap(dictionary[i], dictionary[d(engine)]);
-      }
-    } // obj will be in random order, because it is currently unordered_map
+    if (auto seedArg = ctx.tryExpandRawArg("seed")) {
+      checkLogic(
+          seedArg->isInt() && seedArg->getInt() >= 0,
+          "Shuffle: seed must be a non-negative integer");
+      auto seed = static_cast<uint32_t>(seedArg->getInt());
+      std::minstd_rand seededEngine(seed);
+      std::shuffle(array.begin(), array.end(), seededEngine);
+      return array;
+    }
 
-    return dictionary;
+    std::shuffle(array.begin(), array.end(), defaultEngine);
+    return array;
   }
 
   /**
@@ -971,6 +990,14 @@ class ConfigPreprocessor::BuiltIns {
   }
 
   /**
+   * Returns true if value is a double
+   * Usage: @isDouble(value)
+   */
+  static dynamic isDoubleMacro(Context&& ctx) {
+    return ctx.at("value").isDouble();
+  }
+
+  /**
    * Returns true if value is an object
    * Usage: @isObject(value)
    */
@@ -1118,9 +1145,12 @@ class ConfigPreprocessor::BuiltIns {
    * Usage: @fail(Your message here)
    */
   static dynamic failMacro(Context&& ctx) {
-    const auto& A = ctx.at("msg");
-    checkLogic(A.isString(), "fail: msg is not a string");
-    throw std::logic_error(A.data());
+    const auto& msg = ctx.at("msg");
+    if (msg.isString()) {
+      throw std::logic_error(msg.data());
+    } else {
+      throw std::logic_error(folly::toPrettyJson(msg));
+    }
   }
 
   /**
@@ -1574,6 +1604,8 @@ ConfigPreprocessor::ConfigPreprocessor(
 
   addMacro("int", {"value"}, &BuiltIns::intMacro);
 
+  addMacro("double", {"value"}, &BuiltIns::doubleMacro);
+
   addMacro("str", {"value"}, &BuiltIns::strMacro);
 
   addMacro("bool", {"value"}, &BuiltIns::boolMacro);
@@ -1592,7 +1624,11 @@ ConfigPreprocessor::ConfigPreprocessor(
       &BuiltIns::selectMacro,
       false);
 
-  addMacro("shuffle", {"dictionary"}, &BuiltIns::shuffleMacro);
+  addMacro(
+      "shuffle",
+      {"dictionary", dynamic::object("name", "seed")("optional", true)},
+      &BuiltIns::shuffleMacro,
+      false);
 
   addMacro("slice", {"dictionary", "from", "to"}, &BuiltIns::sliceMacro);
 
@@ -1611,6 +1647,8 @@ ConfigPreprocessor::ConfigPreprocessor(
   addMacro("isBool", {"value"}, &BuiltIns::isBoolMacro);
 
   addMacro("isInt", {"value"}, &BuiltIns::isIntMacro);
+
+  addMacro("isDouble", {"value"}, &BuiltIns::isDoubleMacro);
 
   addMacro("isObject", {"value"}, &BuiltIns::isObjectMacro);
 

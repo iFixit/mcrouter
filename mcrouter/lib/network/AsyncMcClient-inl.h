@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2014-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -25,7 +25,7 @@ inline void AsyncMcClient::closeNow() {
 }
 
 inline void AsyncMcClient::setStatusCallbacks(
-    std::function<void()> onUp,
+    std::function<void(const folly::AsyncSocket&)> onUp,
     std::function<void(ConnectionDownReason)> onDown) {
   base_->setStatusCallbacks(std::move(onUp), std::move(onDown));
 }
